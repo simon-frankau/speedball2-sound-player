@@ -22,3 +22,19 @@ sounds?
    * wav export may also be nice
    * I've been thinking about serialising user notes with... dunno,
      serde, or something?
+
+## Data
+
+ * `data/main.bin` at this point is simply `overlay_00.bin`, taken
+   from my Speedball II Amiga repo.
+   
+TODO: Need the intro music, and want to incorporate overlays 27/28
+into main.bin.
+
+TODO: `sound_table`, which glues together the sequences across
+multiple channels, is not in this memory range. I will need it later.
+
+## Other notes
+
+This code is not defensive. If you feed it bad data, it will try to
+read out of range and die. You have been warned!
