@@ -58,12 +58,12 @@ impl Instrument {
 
 pub struct SoundBank {
     // Raw memory data.
-    data: Vec<u8>,
+    pub data: Vec<u8>,
     // Instrment data scraped into structs.
-    instruments: Vec<Instrument>,
+    pub instruments: Vec<Instrument>,
     // Sequence definitions don't include length, so we just store
     // starting points.
-    sequences: Vec<usize>,
+    pub sequences: Vec<usize>,
 }
 
 // Skip data.
