@@ -37,7 +37,7 @@ fn long(data: &[u8], addr: usize) -> u32 {
 ////////////////////////////////////////////////////////////////////////
 // Instrument definition
 
-#[derive(Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Instrument {
     is_one_shot: bool,
     loop_offset: u16,
@@ -113,7 +113,7 @@ impl SoundBank {
                                 .add(Button::new("Trigger").fill(Color32::DARK_RED))
                                 .clicked()
                             {
-                                channel.trigger();
+                                channel.trigger(instrument);
                             }
                             ui.label(&format!("{:?}", instrument));
                         });
@@ -129,25 +129,24 @@ impl SoundBank {
 
 pub struct SoundChannel {
     bank: Arc<Mutex<SoundBank>>,
-    // TODO
-    running: bool,
-    freq: f32,
-    phase: f32,
+    sound: Option<(Instrument, f32)>,
 }
 
 impl SoundChannel {
     pub fn new(bank: Arc<Mutex<SoundBank>>) -> SoundChannel {
-        SoundChannel {
-            bank,
-            running: false,
-            freq: 440.0,
-            phase: 0.0,
-        }
+        SoundChannel { bank, sound: None }
     }
 
-    pub fn trigger(&mut self) {
-        // More a toggle than a trigger, but useful for testing.
-        self.running = !self.running;
+    pub fn trigger(&mut self, instr: &Instrument) {
+        if let Some((current_instr, _)) = &self.sound {
+            if current_instr == instr {
+                // Already playing. Stop.
+                self.sound = None;
+                return;
+            }
+        }
+
+        self.sound = Some((instr.clone(), 0.0));
     }
 }
 
@@ -158,20 +157,43 @@ impl cpal_wrapper::SoundSource for SoundChannel {
         sample_rate: u32,
         data: &mut [T],
     ) {
-        if self.running {
-            let phase_per_sample = self.freq / (sample_rate as f32);
-            for (idx, elt) in data.iter_mut().enumerate() {
-                let phase =
-                    (self.phase + phase_per_sample * (idx / num_channels as usize) as f32).fract();
-                let val = if phase > 0.5 { 0.5 } else { -0.5 };
-                *elt = val.to_sample::<T>();
-            }
-            self.phase = (self.phase
-                + phase_per_sample * (data.len() / num_channels as usize) as f32)
-                .fract();
-        } else {
+        // Simple base case.
+        for elt in data.iter_mut() {
+            *elt = Sample::EQUILIBRIUM;
+        }
+
+        if let Some((instrument, idx)) = &mut self.sound {
+            /*
+               // TODO: let phase_per_sample = self.freq / (sample_rate as f32);
+               for (idx, elt) in data.iter_mut().enumerate() {
+                   let phase =
+                       (self.phase + phase_per_sample * (idx / num_channels as usize) as f32).fract();
+                   let val = if phase > 0.5 { 0.5 } else { -0.5 };
+                   *elt = val.to_sample::<T>();
+               }
+               self.phase = (self.phase
+                   + phase_per_sample * (data.len() / num_channels as usize) as f32)
+               .fract();
+            */
+            let downsample = sample_rate as f32 / 11025.0; // TODO: Fixed frequency.
+            let rate = downsample * num_channels as f32;
+
+            let mem = &self.bank.lock().unwrap().data;
             for elt in data.iter_mut() {
-                *elt = Sample::EQUILIBRIUM;
+                *idx += 1.0 / rate;
+                let mut idx_int = *idx as usize;
+
+                if idx_int > instrument.sample_len as usize * 2 {
+                    if instrument.is_one_shot {
+                        self.sound = None;
+                        break;
+                    } else {
+                        *idx -= (instrument.sample_len * 2 - instrument.loop_offset) as f32;
+                        idx_int = *idx as usize;
+                    }
+                }
+
+                *elt = (mem[instrument.sample_addr + idx_int] as f32 / 128.0).to_sample::<T>();
             }
         }
     }
