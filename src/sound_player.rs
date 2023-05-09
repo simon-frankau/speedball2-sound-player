@@ -484,14 +484,15 @@ impl cpal_wrapper::SoundSource for SoundChannel {
         // Not going to try to do sub-sample accuracy.
         const FRAMES_PER_SECOND: usize = 50;
         let samples_per_frame = sample_rate as usize / FRAMES_PER_SECOND;
+	let ch = num_channels as usize;
 
         let mut data = data;
         // Fill buffer until we hit a new frame, repeat.
-        while data.len() >= self.samples_remaining {
+        while data.len() / ch as usize>= self.samples_remaining {
             self.sample_channel.fill_buffer(
                 num_channels,
                 sample_rate,
-                &mut data[..self.samples_remaining],
+                &mut data[..self.samples_remaining * ch as usize],
             );
 
             if let Some(sequence) = &mut self.sequence {
@@ -500,13 +501,13 @@ impl cpal_wrapper::SoundSource for SoundChannel {
                 }
             }
 
-            data = &mut data[self.samples_remaining..];
+            data = &mut data[self.samples_remaining * ch..];
             self.samples_remaining = samples_per_frame;
         }
 
         // And fill any leftover.
         self.sample_channel
             .fill_buffer(num_channels, sample_rate, data);
-        self.samples_remaining -= data.len();
+        self.samples_remaining -= data.len() / ch;
     }
 }
