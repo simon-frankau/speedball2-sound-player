@@ -15,6 +15,7 @@ use cpal::Sample;
 use egui::{Button, CollapsingHeader, Color32, Ui};
 
 use crate::cpal_wrapper;
+use crate::sound_data;
 
 // TODO: Not in the data, afaict.
 const NUM_SEQUENCES: usize = 78;
@@ -110,10 +111,10 @@ impl SoundBank {
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
                             if ui
-                                .add(Button::new("Trigger").fill(Color32::DARK_RED))
+                                .add(Button::new("Play").fill(Color32::DARK_RED))
                                 .clicked()
                             {
-                                channel.trigger(instrument);
+                                channel.play(instrument);
                             }
                             ui.label(&format!("{:?}", instrument));
                         });
@@ -124,33 +125,76 @@ impl SoundBank {
 }
 
 ////////////////////////////////////////////////////////////////////////
-// Sound channel capable of playing a sound.
+// Emulations of the low-level "play a sample" functionality provided
+// by Amiga hardware and the sound interrupt routine.
 //
 
-pub struct SoundChannel {
+struct SampleChannel {
     bank: Arc<Mutex<SoundBank>>,
-    sound: Option<(Instrument, f32)>,
+    instr: Option<Instrument>,
+    volume: f32,
+    pitch: usize,
+    phase: f32,
+    step: f32,
 }
 
-impl SoundChannel {
-    pub fn new(bank: Arc<Mutex<SoundBank>>) -> SoundChannel {
-        SoundChannel { bank, sound: None }
-    }
-
-    pub fn trigger(&mut self, instr: &Instrument) {
-        if let Some((current_instr, _)) = &self.sound {
-            if current_instr == instr {
-                // Already playing. Stop.
-                self.sound = None;
-                return;
-            }
+impl SampleChannel {
+    pub fn new(bank: Arc<Mutex<SoundBank>>) -> SampleChannel {
+        SampleChannel {
+            bank,
+            instr: None,
+            volume: 1.0,
+	    pitch: 0,
+            phase: 0.0,
+            step: 0.0,
         }
+    }
 
-        self.sound = Some((instr.clone(), 0.0));
+    // New sounds are triggered immediately.
+    pub fn play(&mut self, instr: &Instrument) {
+        self.instr = Some(instr.clone());
+	self.phase = 0.0;
+	self.set_step(instr.base_octave);
+    }
+
+    // Running sounds are stopped at a convenient point.
+    pub fn stop(&mut self) {
+	if let Some(current_instr) = &mut self.instr {
+	    // Stop at next loop.
+	    current_instr.is_one_shot = true;
+	}
+    }
+
+    pub fn set_volume(&mut self, volume: u16) {
+	const MAX_VOLUME: f32 = 64.0;
+	self.volume = volume as f32 / MAX_VOLUME;
+    }
+
+    // Takes a note number, as used by sequences.
+    pub fn set_pitch(&mut self, pitch: usize) {
+	self.pitch = pitch;
+	if let Some(instr) = &self.instr {
+	    // Already playing, update step.
+	    self.set_step(instr.base_octave);
+	}
+    }
+
+    fn set_step(&mut self, base_octave: usize) {
+	// This is PAL. 0.279365 for NTSC.
+	const CLOCK_INTERVAL_S: f32 = 0.281937e-6;
+
+	// For some reason, the lowest base is one octave above the
+	// lowest note.
+	let base_note = (base_octave + 1) * sound_data::OCTAVE_SIZE;
+	// Pitch table is in quarter semi-tones.
+	let offset = self.pitch * 4;
+	let period_ticks = sound_data::PITCHES[base_note + offset];
+	self.step = period_ticks as f32 * CLOCK_INTERVAL_S;
+	println!("Step: {}", self.step);
     }
 }
 
-impl cpal_wrapper::SoundSource for SoundChannel {
+impl cpal_wrapper::SoundSource for SampleChannel {
     fn fill_buffer<T: Sample + cpal::FromSample<f32> + std::ops::Add<Output = T>>(
         &mut self,
         num_channels: u16,
@@ -162,39 +206,75 @@ impl cpal_wrapper::SoundSource for SoundChannel {
             *elt = Sample::EQUILIBRIUM;
         }
 
-        if let Some((instrument, idx)) = &mut self.sound {
-            /*
-               // TODO: let phase_per_sample = self.freq / (sample_rate as f32);
-               for (idx, elt) in data.iter_mut().enumerate() {
-                   let phase =
-                       (self.phase + phase_per_sample * (idx / num_channels as usize) as f32).fract();
-                   let val = if phase > 0.5 { 0.5 } else { -0.5 };
-                   *elt = val.to_sample::<T>();
-               }
-               self.phase = (self.phase
-                   + phase_per_sample * (data.len() / num_channels as usize) as f32)
-               .fract();
-            */
-            let downsample = sample_rate as f32 / 11025.0; // TODO: Fixed frequency.
-            let rate = downsample * num_channels as f32;
+        if let Some(instrument) = &mut self.instr {
+	    // Treating multiple channels as single channel at a
+	    // higher frequency is wrong, but will do until I write
+	    // the mixer.
+            let rate = sample_rate as f32 * num_channels as f32;
+	    let step = 1.0 / (self.step * rate);
 
             let mem = &self.bank.lock().unwrap().data;
             for elt in data.iter_mut() {
-                *idx += 1.0 / rate;
-                let mut idx_int = *idx as usize;
+                self.phase += step;
+                let mut idx_int = self.phase as usize;
 
-                if idx_int > instrument.sample_len as usize * 2 {
+                if idx_int >= instrument.sample_len as usize * 2 {
                     if instrument.is_one_shot {
-                        self.sound = None;
+                        self.instr = None;
                         break;
                     } else {
-                        *idx -= (instrument.sample_len * 2 - instrument.loop_offset) as f32;
-                        idx_int = *idx as usize;
+                        self.phase -= (instrument.sample_len * 2 - instrument.loop_offset) as f32;
+                        idx_int = self.phase as usize;
                     }
                 }
-
-                *elt = (mem[instrument.sample_addr + idx_int] as f32 / 128.0).to_sample::<T>();
+		let tmp = (mem[instrument.sample_addr + idx_int] as f32 / 128.0);
+                *elt = tmp.to_sample::<T>();
+		println!("{}", tmp);
             }
         }
+    }
+}
+
+////////////////////////////////////////////////////////////////////////
+// Sound channel capable of playing a sound.
+//
+
+// TODO: Features to emulate:
+// * sound_effects and sound_op_effect
+// * sound_envelopes and sound_op_set_envelope
+// * sound_update every 50th of a second.
+//   * sound_update_hardware_channel for basic move-along.
+// * Mixing together the multiple channels, etc.
+
+pub struct SoundChannel {
+    bank: Arc<Mutex<SoundBank>>,
+    sample_channel: SampleChannel,
+}
+
+impl SoundChannel {
+    pub fn new(bank: Arc<Mutex<SoundBank>>) -> SoundChannel {
+	let sample_channel = SampleChannel::new(bank.clone());
+        SoundChannel { bank, sample_channel }
+    }
+
+    pub fn play(&mut self, instr: &Instrument) {
+	self.sample_channel.set_volume(64);
+	self.sample_channel.set_pitch(0);
+	self.sample_channel.play(instr);
+    }
+
+    pub fn stop(&mut self) {
+	self.sample_channel.stop();
+    }
+}
+
+impl cpal_wrapper::SoundSource for SoundChannel {
+    fn fill_buffer<T: Sample + cpal::FromSample<f32> + std::ops::Add<Output = T>>(
+        &mut self,
+        num_channels: u16,
+        sample_rate: u32,
+        data: &mut [T],
+    ) {
+	self.sample_channel.fill_buffer(num_channels, sample_rate, data);
     }
 }

@@ -12,9 +12,10 @@ use std::sync::{Arc, Mutex};
 use clap::Parser;
 
 use eframe::{App, Frame, NativeOptions};
-use egui::{CentralPanel, Context};
+use egui::{Button, CentralPanel, Color32, Context};
 
 mod cpal_wrapper;
+mod sound_data;
 mod sound_player;
 
 /// Player of Speedball II sounds
@@ -43,6 +44,12 @@ impl App for PlayerApp {
     fn update(&mut self, ctx: &Context, _frame: &mut Frame) {
         CentralPanel::default().show(ctx, |ui| {
             let mut channel = self.channel.lock().unwrap();
+	    if ui
+                .add(Button::new("Stop").fill(Color32::DARK_RED))
+                .clicked()
+            {
+                channel.stop();
+            }
             self.bank.lock().unwrap().ui(ui, &mut channel);
         });
     }
