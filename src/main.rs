@@ -44,7 +44,7 @@ impl App for PlayerApp {
     fn update(&mut self, ctx: &Context, _frame: &mut Frame) {
         CentralPanel::default().show(ctx, |ui| {
             let mut channel = self.channel.lock().unwrap();
-	    if ui
+            if ui
                 .add(Button::new("Stop").fill(Color32::DARK_RED))
                 .clicked()
             {
