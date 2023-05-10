@@ -14,22 +14,24 @@ sounds?
    * Fix up the overlay weirdness.
  * Build tooling to extract the sound data into appropriate data
    structures.
- * Slap an egui on it.
  * Start playing sounds
-   * Start with playing raw samples
    * Then incrementally add the ability to play sequences
+	 * Vibrato, tremolo, and envelopes.
    * And then multi-channel sounds
    * wav export may also be nice
    * I've been thinking about serialising user notes with... dunno,
      serde, or something?
+   * Sample waveform visualisation might be nice.
 
 ## Data
 
- * `data/main.bin` at this point is simply `overlay_00.bin`, taken
-   from my Speedball II Amiga repo.
+ * `data/main.bin` is basically `overlay_00.bin`, taken from my
+   Speedball II Amiga repo. In order to incorporate Overlay #27, I
+   concatendated `overlay_27.bin` onto the end of the file, and then
+   overwrote offset 0x1a478 from 0x15118 (where the overlay gets
+   loaded) to 0x1b000 (where it gets placed after the end of the file.
    
-TODO: Need the intro music, and want to incorporate overlays 27/28
-into main.bin.
+TODO: Need the intro music.
 
 TODO: `sound_table`, which glues together the sequences across
 multiple channels, is not in this memory range. I will need it later.
