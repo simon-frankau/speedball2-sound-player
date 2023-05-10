@@ -353,7 +353,8 @@ impl Sequence {
                 if cfg!(debug) {
                     println!("Rest");
                 }
-                return EvalResult::Cont;
+                // TODO: Should stop playing if loop-to-zero (!).
+                return EvalResult::Done;
             }
             0x94 => {
                 // Set tempo

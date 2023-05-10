@@ -7,6 +7,11 @@
 // (C) Copyright 2023 Simon Frankau. All Rights Reserved, see LICENSE.
 //
 
+////////////////////////////////////////////////////////////////////////
+// Note pitches
+//
+
+// Table is in 4 steps per semi-tone.
 pub const OCTAVE_SIZE: usize = 12 * 4;
 
 // 11 octaves of quarter semi-tones.
@@ -87,4 +92,225 @@ pub const PITCHES: [u16; OCTAVE_SIZE * 11] = [
     0x0026, 0x0025, 0x0025, 0x0024, 0x0024, 0x0023, 0x0023, 0x0022,
     0x0022, 0x0021, 0x0021, 0x0020, 0x0020, 0x001F, 0x001F, 0x001E,
     0x001E, 0x001E, 0x001D, 0x001D, 0x001C, 0x001C, 0x001C, 0x001B,
+];
+
+////////////////////////////////////////////////////////////////////////
+// Vibrato/tremlo effect definitions.
+//
+
+// Applies to both tremolo and vibrato.
+struct Bend {
+    length: u8,
+    rate: i8,
+    pause: u8,
+}
+
+const NO_BEND: Bend = Bend {
+    length: 0,
+    rate: 0,
+    pause: 0,
+};
+
+struct Effect {
+    tremolos: [Bend; 2],
+    vibrato: [Bend; 3],
+}
+
+const EFFECTS: [Effect; 23] = [
+    Effect {
+        tremolos: [NO_BEND, NO_BEND],
+        vibrato: [NO_BEND, NO_BEND, NO_BEND],
+    },
+    Effect {
+        tremolos: [
+            NO_BEND,
+            Bend { length: 25, rate: -2, pause: 4 },
+        ],
+        vibrato: [NO_BEND, NO_BEND, NO_BEND],
+    },
+    Effect {
+        tremolos: [
+            NO_BEND,
+            Bend { length: 63, rate: -1, pause: 1 },
+        ],
+        vibrato: [NO_BEND, NO_BEND, NO_BEND],
+    },
+    Effect {
+        tremolos: [
+            NO_BEND,
+            Bend { length: 25, rate: -1, pause: 13 },
+        ],
+        vibrato: [NO_BEND, NO_BEND, NO_BEND],
+    },
+    Effect {
+        tremolos: [
+            NO_BEND,
+            Bend { length: 20, rate: -3, pause: 1 },
+        ],
+        vibrato: [NO_BEND, NO_BEND, NO_BEND],
+    },
+    Effect {
+        tremolos: [
+            Bend { length: 12, rate: 1, pause: 0 },
+            Bend { length: 22, rate: -1, pause: 0 },
+        ],
+        vibrato: [
+            Bend { length: 1, rate: -5, pause: 0 },
+            NO_BEND,
+            NO_BEND,
+        ],
+    },
+    Effect {
+        tremolos: [
+            Bend { length: 12, rate: 1, pause: 0 },
+            Bend { length: 22, rate: -1, pause: 0 },
+        ],
+        vibrato: [
+            Bend { length: 1, rate: -10, pause: 0 },
+            NO_BEND,
+            NO_BEND,
+        ],
+    },
+    Effect {
+        tremolos: [NO_BEND, NO_BEND],
+        vibrato: [
+            Bend { length: 10, rate: -12, pause: 0 },
+            Bend { length: 10, rate: 12, pause: 0 },
+            NO_BEND,
+        ],
+    },
+    Effect {
+        tremolos: [NO_BEND, NO_BEND],
+        vibrato: [
+            Bend { length: 40, rate: -3, pause: 0 },
+            Bend { length: 60, rate: 3, pause: 0 },
+            NO_BEND,
+        ],
+    },
+    Effect {
+        tremolos: [
+            NO_BEND,
+            Bend { length: 24, rate: -2, pause: 0 },
+        ],
+        vibrato: [
+            Bend { length: 40, rate: -10, pause: 0 },
+            Bend { length: 60, rate: 3, pause: 0 },
+            NO_BEND,
+        ],
+    },
+    Effect {
+        tremolos: [
+            Bend { length: 25, rate: 1, pause: 0 },
+            Bend { length: 25, rate: -1, pause: 0 },
+        ],
+        vibrato: [NO_BEND, NO_BEND, NO_BEND],
+    },
+    Effect {
+        tremolos: [
+            Bend { length: 16, rate: 1, pause: 0 },
+            Bend { length: 16, rate: -1, pause: 0 },
+        ],
+        vibrato: [
+            Bend { length: 6, rate: -32, pause: 0 },
+            Bend { length: 6, rate: 32, pause: 0 },
+            NO_BEND,
+        ],
+    },
+    Effect {
+        tremolos: [NO_BEND, NO_BEND],
+        vibrato: [
+            Bend { length: 80, rate: -80, pause: 0 },
+            NO_BEND,
+            NO_BEND,
+        ],
+    },
+    Effect {
+        tremolos: [
+            NO_BEND,
+            Bend { length: 30, rate: -4, pause: 0 },
+        ],
+        vibrato: [NO_BEND, NO_BEND, NO_BEND],
+    },
+    Effect {
+        tremolos: [
+            NO_BEND,
+            Bend { length: 55, rate: -1, pause: 2 },
+        ],
+        vibrato: [NO_BEND, NO_BEND, NO_BEND],
+    },
+    Effect {
+        tremolos: [NO_BEND, NO_BEND],
+        vibrato: [
+            Bend { length: 20, rate: 40, pause: 0 },
+            NO_BEND,
+            NO_BEND,
+        ],
+    },
+    Effect {
+        tremolos: [
+            Bend { length: 25, rate: 2, pause: 0 },
+            Bend { length: 50, rate: -2, pause: 0 },
+        ],
+        vibrato: [
+            Bend { length: 20, rate: -40, pause: 0 },
+            NO_BEND,
+            NO_BEND,
+        ],
+    },
+    Effect {
+        tremolos: [
+            NO_BEND,
+            Bend { length: 35, rate: -2, pause: 0 },
+        ],
+        vibrato: [NO_BEND, NO_BEND, NO_BEND],
+    },
+    Effect {
+        tremolos: [
+            NO_BEND,
+            Bend { length: 31, rate: -2, pause: 1 },
+        ],
+        vibrato: [
+            Bend { length: 80, rate: 80, pause: 0 },
+            NO_BEND,
+            NO_BEND,
+        ],
+    },
+    Effect {
+        tremolos: [
+            NO_BEND,
+            Bend { length: 22, rate: -2, pause: 1 },
+        ],
+        vibrato: [
+            Bend { length: 60, rate: -60, pause: 0 },
+            NO_BEND,
+            NO_BEND,
+        ],
+    },
+    Effect {
+        tremolos: [NO_BEND, NO_BEND],
+        vibrato: [
+            Bend { length: 80, rate: -80, pause: 0 },
+            NO_BEND,
+            NO_BEND,
+        ],
+    },
+    Effect {
+        tremolos: [NO_BEND, NO_BEND],
+        vibrato: [
+            Bend { length: 10, rate: -15, pause: 0 },
+            NO_BEND,
+            NO_BEND,
+        ],
+    },
+    Effect {
+        tremolos: [
+            NO_BEND,
+            Bend { length: 40, rate: -1, pause: 0 },
+        ],
+        vibrato: [
+            Bend { length: 90, rate: 90, pause: 0 },
+            NO_BEND,
+            NO_BEND,
+        ],
+    },
 ];
