@@ -155,6 +155,7 @@ struct SampleChannel {
     pitch: usize,
     phase: f32,
     step: f32,
+    lerp: bool,
 }
 
 impl SampleChannel {
@@ -166,6 +167,7 @@ impl SampleChannel {
             pitch: 0,
             phase: 0.0,
             step: 0.0,
+            lerp: false,
         }
     }
 
@@ -249,7 +251,27 @@ impl cpal_wrapper::SoundSource for SampleChannel {
                     }
                 }
 
-                *elt = (mem[instrument.sample_addr + idx_int] as f32 / 128.0).to_sample::<T>();
+                let val = if self.lerp {
+                    let left = mem[instrument.sample_addr + idx_int] as i8 as f32;
+                    let right_idx = instrument.sample_addr + idx_int + 1;
+                    let right = if right_idx
+                        == instrument.sample_addr + instrument.sample_len as usize * 2
+                    {
+                        if instrument.is_one_shot {
+                            0
+                        } else {
+                            mem[instrument.sample_addr + instrument.loop_offset as usize]
+                        }
+                    } else {
+                        mem[right_idx]
+                    } as i8 as f32;
+                    let x = self.phase.fract();
+                    left * (1.0 - x) + right * x
+                } else {
+                    mem[instrument.sample_addr + idx_int] as i8 as f32
+                };
+
+                *elt = (val / 128.0).to_sample::<T>();
             }
         }
     }
@@ -472,6 +494,16 @@ impl SoundChannel {
         self.sample_channel.stop();
         self.sequence = None;
     }
+
+    pub fn ui(&mut self, ui: &mut Ui) {
+        if ui
+            .add(Button::new("Stop").fill(Color32::DARK_RED))
+            .clicked()
+        {
+            self.stop();
+        }
+        ui.checkbox(&mut self.sample_channel.lerp, "Linear interpolation");
+    }
 }
 
 impl cpal_wrapper::SoundSource for SoundChannel {
@@ -484,11 +516,11 @@ impl cpal_wrapper::SoundSource for SoundChannel {
         // Not going to try to do sub-sample accuracy.
         const FRAMES_PER_SECOND: usize = 50;
         let samples_per_frame = sample_rate as usize / FRAMES_PER_SECOND;
-	let ch = num_channels as usize;
+        let ch = num_channels as usize;
 
         let mut data = data;
         // Fill buffer until we hit a new frame, repeat.
-        while data.len() / ch as usize>= self.samples_remaining {
+        while data.len() / ch as usize >= self.samples_remaining {
             self.sample_channel.fill_buffer(
                 num_channels,
                 sample_rate,
