@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 
 use cpal::Sample;
 
-use egui::{Button, CollapsingHeader, Color32, Ui};
+use egui::{Button, CollapsingHeader, Color32, DragValue, Ui};
 
 use crate::cpal_wrapper;
 use crate::sound_data;
@@ -164,10 +164,10 @@ impl SampleChannel {
             bank,
             instr: None,
             volume: 1.0,
-            pitch: 0,
+            pitch: 48 * 4,
             phase: 0.0,
             step: 0.0,
-            lerp: false,
+            lerp: true,
         }
     }
 
@@ -481,8 +481,6 @@ impl SoundChannel {
     }
 
     pub fn play_instr(&mut self, instr: &Instrument) {
-        self.sample_channel.set_volume(64);
-        self.sample_channel.set_pitch(0);
         self.sample_channel.play(instr);
     }
 
@@ -496,13 +494,25 @@ impl SoundChannel {
     }
 
     pub fn ui(&mut self, ui: &mut Ui) {
-        if ui
-            .add(Button::new("Stop").fill(Color32::DARK_RED))
-            .clicked()
-        {
-            self.stop();
-        }
-        ui.checkbox(&mut self.sample_channel.lerp, "Linear interpolation");
+        ui.horizontal(|ui| {
+            if ui
+                .add(Button::new("Stop").fill(Color32::DARK_RED))
+                .clicked()
+            {
+                self.stop();
+            }
+            ui.checkbox(&mut self.sample_channel.lerp, "Linear interpolation");
+            ui.label("Volume");
+            ui.add(DragValue::new(&mut self.sample_channel.volume));
+            ui.label("Pitch");
+            if ui
+                .add(DragValue::new(&mut self.sample_channel.pitch))
+                .changed()
+            {
+                // Messy. Need to force recalculation of derived period.
+                self.sample_channel.set_pitch(self.sample_channel.pitch);
+            }
+        });
     }
 }
 
