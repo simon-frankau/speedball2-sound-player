@@ -15,7 +15,7 @@ use cpal::Sample;
 use egui::{Button, CollapsingHeader, Color32, DragValue, Ui};
 
 use crate::cpal_wrapper;
-use crate::sound_data;
+use crate::sound_data::*;
 
 // TODO: Not in the data, afaict.
 const NUM_SEQUENCES: usize = 78;
@@ -153,8 +153,8 @@ struct SampleChannel {
     instr: Option<Instrument>,
     volume: f32,
     pitch: usize,
+    pitch_adjust: i16,
     phase: f32,
-    step: f32,
     lerp: bool,
 }
 
@@ -165,8 +165,8 @@ impl SampleChannel {
             instr: None,
             volume: 1.0,
             pitch: 48 * 4,
+            pitch_adjust: 0,
             phase: 0.0,
-            step: 0.0,
             lerp: true,
         }
     }
@@ -175,7 +175,6 @@ impl SampleChannel {
     pub fn play(&mut self, instr: &Instrument) {
         self.instr = Some(instr.clone());
         self.phase = 0.0;
-        self.set_step(instr.base_octave);
     }
 
     // Running sounds are stopped at a convenient point.
@@ -191,29 +190,20 @@ impl SampleChannel {
         self.instr = None;
     }
 
-    pub fn set_volume(&mut self, volume: u16) {
-        const MAX_VOLUME: f32 = 64.0;
-        self.volume = volume as f32 / MAX_VOLUME;
-    }
+    fn calc_time_step(&self) -> f32 {
+        if let Some(instrument) = &self.instr {
+            // This is PAL. 0.279365 for NTSC.
+            const CLOCK_INTERVAL_S: f32 = 0.281937e-6;
 
-    // Takes a note number, as used by sequences.
-    pub fn set_pitch(&mut self, pitch: usize) {
-        self.pitch = pitch;
-        if let Some(instr) = &self.instr {
-            // Already playing, update step.
-            self.set_step(instr.base_octave);
+            // For some reason, the lowest base is one octave above the
+            // lowest note.
+            let base_note = (instrument.base_octave + 1) * OCTAVE_SIZE;
+            let period_tick =
+                PITCHES[base_note + self.pitch].wrapping_add_signed(self.pitch_adjust);
+            period_tick as f32 * CLOCK_INTERVAL_S
+        } else {
+            0.0
         }
-    }
-
-    fn set_step(&mut self, base_octave: usize) {
-        // This is PAL. 0.279365 for NTSC.
-        const CLOCK_INTERVAL_S: f32 = 0.281937e-6;
-
-        // For some reason, the lowest base is one octave above the
-        // lowest note.
-        let base_note = (base_octave + 1) * sound_data::OCTAVE_SIZE;
-        let period_ticks = sound_data::PITCHES[base_note + self.pitch];
-        self.step = period_ticks as f32 * CLOCK_INTERVAL_S;
     }
 }
 
@@ -229,13 +219,14 @@ impl cpal_wrapper::SoundSource for SampleChannel {
             *elt = Sample::EQUILIBRIUM;
         }
 
-        if let Some(instrument) = &mut self.instr {
-            // Treating multiple channels as single channel at a
-            // higher frequency is wrong, but will do until I write
-            // the mixer.
-            let rate = sample_rate as f32 * num_channels as f32;
-            let step = 1.0 / (self.step * rate);
+        // Treating multiple channels as single channel at a
+        // higher frequency is wrong, but will do until I write
+        // the mixer.
+        let rate = sample_rate as f32 * num_channels as f32;
+        let time_step = self.calc_time_step();
+        let step = 1.0 / (time_step * rate);
 
+        if let Some(instrument) = &mut self.instr {
             let mem = &self.bank.lock().unwrap().data;
             for elt in data.iter_mut() {
                 self.phase += step;
@@ -278,6 +269,61 @@ impl cpal_wrapper::SoundSource for SampleChannel {
 }
 
 ////////////////////////////////////////////////////////////////////////
+// Implementation of the tremolo/vibrato effects.
+//
+
+#[derive(Clone, Copy)]
+pub struct BendState {
+    pause_count: u8,
+    length_count: u8,
+}
+
+impl BendState {
+    fn new() -> BendState {
+        BendState {
+            pause_count: 0,
+            length_count: 0,
+        }
+    }
+
+    fn from(bend: &Bend) -> BendState {
+        BendState {
+            pause_count: bend.pause,
+            length_count: bend.length,
+        }
+    }
+}
+
+pub struct EffectState {
+    tremolos: [BendState; 2],
+    vibratos: [BendState; 3],
+    vol_adjust: i16,
+    period_adjust: i16,
+}
+
+impl EffectState {
+    // Used to initialise state when setting a new effect.
+    fn new() -> EffectState {
+        EffectState {
+            tremolos: [BendState::new(); 2],
+            vibratos: [BendState::new(); 3],
+            vol_adjust: 0,
+            period_adjust: 0,
+        }
+    }
+
+    // Used to reset state when playing new notes.
+    fn from(effect: Effect) -> EffectState {
+        EffectState {
+            tremolos: effect.tremolos.map(|x| BendState::from(&x)),
+            vibratos: effect.vibratos.map(|x| BendState::from(&x)),
+            vol_adjust: 0,
+            period_adjust: 0,
+        }
+    }
+}
+
+////////////////////////////////////////////////////////////////////////
 // Sequence of commands for playing sounds, along with the state to do
 // so.
 //
@@ -289,6 +335,8 @@ pub struct Sequence {
     instrument_idx: usize,
     note_len: usize,
     ttl: usize,
+    effect: Effect,
+    effect_state: EffectState,
 }
 
 #[derive(Eq, PartialEq)]
@@ -300,6 +348,7 @@ enum EvalResult {
 
 impl Sequence {
     pub fn new(addr: usize) -> Sequence {
+        let effect = EFFECTS[0];
         Sequence {
             addr,
             frames_per_beat: 0,
@@ -307,6 +356,8 @@ impl Sequence {
             instrument_idx: 0,
             note_len: 0,
             ttl: 0,
+            effect,
+            effect_state: EffectState::from(effect),
         }
     }
 
@@ -318,11 +369,12 @@ impl Sequence {
 
         if code < 0x80 {
             // TODO: Reinitialise envelope.
-            // TODO: Reinitialise tremolo and vibrato.
             if cfg!(debug) {
                 println!("Note {}", code);
             }
-            channel.set_pitch((code as usize * 4).wrapping_add_signed(self.transposition));
+            // New notes reset tremolo/vibrato state.
+            self.effect_state = EffectState::from(self.effect);
+            channel.pitch = ((code as usize * 4).wrapping_add_signed(self.transposition));
             channel.play(&bank.instruments[self.instrument_idx]);
             self.ttl = self.note_len;
             return EvalResult::Done;
@@ -337,7 +389,8 @@ impl Sequence {
                 if cfg!(debug) {
                     println!("Vol: {}", volume);
                 }
-                channel.set_volume(volume as u16);
+                const MAX_VOLUME: f32 = 64.0;
+                channel.volume = volume as f32 / MAX_VOLUME;
             }
             0x8c => {
                 // Set note length
@@ -369,8 +422,9 @@ impl Sequence {
                 // Set effect
                 let effect = bank.data[self.addr];
                 self.addr += 1;
-                // TODO: Actually apply effect.
-                println!("Effect: {} (NYI)", effect);
+                println!("Effect: {}", effect);
+                self.effect = EFFECTS[effect as usize];
+                self.effect_state = EffectState::new();
             }
             0xa8 => {
                 // Loop flags
@@ -383,6 +437,7 @@ impl Sequence {
                 if cfg!(debug) {
                     println!("Stop");
                 }
+                channel.stop_hard();
                 return EvalResult::Stop;
             }
             0xbc => {
@@ -425,10 +480,8 @@ impl Sequence {
     // Perform a timestep of the sequence, usually synchronised with a
     // vertical blanking interval. Returns whether the sequence
     // continues.
-    fn step_frame(&mut self, bank: &SoundBank, channel: &mut SampleChannel) -> bool {
+    fn step_frame_instructions(&mut self, bank: &SoundBank, channel: &mut SampleChannel) -> bool {
         if self.ttl > 0 {
-            self.ttl -= 1;
-            // TODO: Actually, still need to do non-command updates!
             return true;
         }
 
@@ -439,16 +492,66 @@ impl Sequence {
             result = self.eval(bank, channel);
         }
 
+        self.ttl = self.note_len;
+
         if result == EvalResult::Done {
-            self.ttl = self.note_len;
-            // TODO: Fall through to LAB_000142c0.
-            self.ttl -= 1;
-            // TODO: Common with the non-command updates.
             true
         } else {
-            channel.stop_hard();
             false
         }
+    }
+
+    fn step_frame_effects(&mut self, bank: &SoundBank, channel: &mut SampleChannel) {
+        let mut acted = false;
+        for (fx, fx_state) in self
+            .effect
+            .vibratos
+            .iter()
+            .zip(self.effect_state.vibratos.iter_mut())
+        {
+            if fx_state.pause_count > 0 {
+                fx_state.pause_count -= 1;
+                continue;
+            }
+
+            if fx_state.length_count == 0 {
+                continue;
+            }
+            fx_state.length_count -= 1;
+            fx_state.pause_count = fx.pause;
+            self.effect_state.period_adjust += fx.rate;
+            acted = true;
+            break;
+        }
+        if !acted {
+            println!("Vib reset");
+            self.effect_state.vibratos = self.effect.vibratos.map(|x| BendState::from(&x));
+        }
+        channel.pitch_adjust = self.effect_state.period_adjust;
+        println!("PA: {}", channel.pitch_adjust);
+    }
+
+    fn step_frame_envelope(&mut self, bank: &SoundBank, channel: &mut SampleChannel) {
+        // TODO
+    }
+
+    fn step_frame(
+        &mut self,
+        bank: &SoundBank,
+        channel: &mut SampleChannel,
+        options: &Options,
+    ) -> bool {
+        let continuing = self.step_frame_instructions(bank, channel);
+        if continuing {
+            self.ttl -= 1;
+            // TODO: Technically, if envelope is set, effects should be skipped.
+            if options.tremolo {
+                // TODO!
+                self.step_frame_effects(bank, channel);
+            }
+            self.step_frame_envelope(bank, channel);
+        }
+        continuing
     }
 }
 
@@ -463,11 +566,31 @@ impl Sequence {
 //   * sound_update_hardware_channel for basic move-along.
 // * Mixing together the multiple channels, etc.
 
+pub struct Options {
+    tremolo: bool,
+    vibrato: bool,
+}
+
+impl Options {
+    fn new() -> Options {
+        Options {
+            tremolo: true,
+            vibrato: true,
+        }
+    }
+
+    fn ui(&mut self, ui: &mut Ui) {
+        ui.checkbox(&mut self.tremolo, "Tremolo");
+        ui.checkbox(&mut self.vibrato, "Vibrato");
+    }
+}
+
 pub struct SoundChannel {
     bank: Arc<Mutex<SoundBank>>,
     sample_channel: SampleChannel,
     samples_remaining: usize,
     sequence: Option<Sequence>,
+    options: Options,
 }
 
 impl SoundChannel {
@@ -478,6 +601,7 @@ impl SoundChannel {
             sample_channel,
             samples_remaining: 0,
             sequence: None,
+            options: Options::new(),
         }
     }
 
@@ -506,13 +630,8 @@ impl SoundChannel {
             ui.label("Volume");
             ui.add(DragValue::new(&mut self.sample_channel.volume));
             ui.label("Pitch");
-            if ui
-                .add(DragValue::new(&mut self.sample_channel.pitch))
-                .changed()
-            {
-                // Messy. Need to force recalculation of derived period.
-                self.sample_channel.set_pitch(self.sample_channel.pitch);
-            }
+            ui.add(DragValue::new(&mut self.sample_channel.pitch));
+            self.options.ui(ui);
         });
     }
 }
@@ -539,7 +658,11 @@ impl cpal_wrapper::SoundSource for SoundChannel {
             );
 
             if let Some(sequence) = &mut self.sequence {
-                if !sequence.step_frame(&self.bank.lock().unwrap(), &mut self.sample_channel) {
+                if !sequence.step_frame(
+                    &self.bank.lock().unwrap(),
+                    &mut self.sample_channel,
+                    &self.options,
+                ) {
                     self.sequence = None;
                 }
             }

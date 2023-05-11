@@ -99,62 +99,64 @@ pub const PITCHES: [u16; OCTAVE_SIZE * 11] = [
 //
 
 // Applies to both tremolo and vibrato.
-struct Bend {
-    length: u8,
-    rate: i8,
-    pause: u8,
+#[derive(Copy, Clone)]
+pub struct Bend {
+    pub length: u8,
+    pub rate: i16,
+    pub pause: u8,
 }
 
-const NO_BEND: Bend = Bend {
+pub const NO_BEND: Bend = Bend {
     length: 0,
     rate: 0,
     pause: 0,
 };
 
-struct Effect {
-    tremolos: [Bend; 2],
-    vibrato: [Bend; 3],
+#[derive(Copy, Clone)]
+pub struct Effect {
+    pub tremolos: [Bend; 2],
+    pub vibratos: [Bend; 3],
 }
 
-const EFFECTS: [Effect; 23] = [
+pub const EFFECTS: [Effect; 23] = [
     Effect {
         tremolos: [NO_BEND, NO_BEND],
-        vibrato: [NO_BEND, NO_BEND, NO_BEND],
+        vibratos: [NO_BEND, NO_BEND, NO_BEND],
     },
     Effect {
         tremolos: [
             NO_BEND,
             Bend { length: 25, rate: -2, pause: 4 },
         ],
-        vibrato: [NO_BEND, NO_BEND, NO_BEND],
+        vibratos: [NO_BEND, NO_BEND, NO_BEND],
     },
     Effect {
         tremolos: [
             NO_BEND,
             Bend { length: 63, rate: -1, pause: 1 },
         ],
-        vibrato: [NO_BEND, NO_BEND, NO_BEND],
+        vibratos: [NO_BEND, NO_BEND, NO_BEND],
     },
     Effect {
         tremolos: [
             NO_BEND,
             Bend { length: 25, rate: -1, pause: 13 },
         ],
-        vibrato: [NO_BEND, NO_BEND, NO_BEND],
+        vibratos: [NO_BEND, NO_BEND, NO_BEND],
     },
     Effect {
         tremolos: [
             NO_BEND,
             Bend { length: 20, rate: -3, pause: 1 },
         ],
-        vibrato: [NO_BEND, NO_BEND, NO_BEND],
+        vibratos: [NO_BEND, NO_BEND, NO_BEND],
     },
     Effect {
         tremolos: [
             Bend { length: 12, rate: 1, pause: 0 },
             Bend { length: 22, rate: -1, pause: 0 },
         ],
-        vibrato: [
+        vibratos: [
             Bend { length: 1, rate: -5, pause: 0 },
             NO_BEND,
             NO_BEND,
@@ -165,7 +167,7 @@ const EFFECTS: [Effect; 23] = [
             Bend { length: 12, rate: 1, pause: 0 },
             Bend { length: 22, rate: -1, pause: 0 },
         ],
-        vibrato: [
+        vibratos: [
             Bend { length: 1, rate: -10, pause: 0 },
             NO_BEND,
             NO_BEND,
@@ -173,7 +175,7 @@ const EFFECTS: [Effect; 23] = [
     },
     Effect {
         tremolos: [NO_BEND, NO_BEND],
-        vibrato: [
+        vibratos: [
             Bend { length: 10, rate: -12, pause: 0 },
             Bend { length: 10, rate: 12, pause: 0 },
             NO_BEND,
@@ -181,7 +183,7 @@ const EFFECTS: [Effect; 23] = [
     },
     Effect {
         tremolos: [NO_BEND, NO_BEND],
-        vibrato: [
+        vibratos: [
             Bend { length: 40, rate: -3, pause: 0 },
             Bend { length: 60, rate: 3, pause: 0 },
             NO_BEND,
@@ -192,7 +194,7 @@ const EFFECTS: [Effect; 23] = [
             NO_BEND,
             Bend { length: 24, rate: -2, pause: 0 },
         ],
-        vibrato: [
+        vibratos: [
             Bend { length: 40, rate: -10, pause: 0 },
             Bend { length: 60, rate: 3, pause: 0 },
             NO_BEND,
@@ -203,14 +205,14 @@ const EFFECTS: [Effect; 23] = [
             Bend { length: 25, rate: 1, pause: 0 },
             Bend { length: 25, rate: -1, pause: 0 },
         ],
-        vibrato: [NO_BEND, NO_BEND, NO_BEND],
+        vibratos: [NO_BEND, NO_BEND, NO_BEND],
     },
     Effect {
         tremolos: [
             Bend { length: 16, rate: 1, pause: 0 },
             Bend { length: 16, rate: -1, pause: 0 },
         ],
-        vibrato: [
+        vibratos: [
             Bend { length: 6, rate: -32, pause: 0 },
             Bend { length: 6, rate: 32, pause: 0 },
             NO_BEND,
@@ -218,7 +220,7 @@ const EFFECTS: [Effect; 23] = [
     },
     Effect {
         tremolos: [NO_BEND, NO_BEND],
-        vibrato: [
+        vibratos: [
             Bend { length: 80, rate: -80, pause: 0 },
             NO_BEND,
             NO_BEND,
@@ -229,18 +231,18 @@ const EFFECTS: [Effect; 23] = [
             NO_BEND,
             Bend { length: 30, rate: -4, pause: 0 },
         ],
-        vibrato: [NO_BEND, NO_BEND, NO_BEND],
+        vibratos: [NO_BEND, NO_BEND, NO_BEND],
     },
     Effect {
         tremolos: [
             NO_BEND,
             Bend { length: 55, rate: -1, pause: 2 },
         ],
-        vibrato: [NO_BEND, NO_BEND, NO_BEND],
+        vibratos: [NO_BEND, NO_BEND, NO_BEND],
     },
     Effect {
         tremolos: [NO_BEND, NO_BEND],
-        vibrato: [
+        vibratos: [
             Bend { length: 20, rate: 40, pause: 0 },
             NO_BEND,
             NO_BEND,
@@ -251,7 +253,7 @@ const EFFECTS: [Effect; 23] = [
             Bend { length: 25, rate: 2, pause: 0 },
             Bend { length: 50, rate: -2, pause: 0 },
         ],
-        vibrato: [
+        vibratos: [
             Bend { length: 20, rate: -40, pause: 0 },
             NO_BEND,
             NO_BEND,
@@ -262,14 +264,14 @@ const EFFECTS: [Effect; 23] = [
             NO_BEND,
             Bend { length: 35, rate: -2, pause: 0 },
         ],
-        vibrato: [NO_BEND, NO_BEND, NO_BEND],
+        vibratos: [NO_BEND, NO_BEND, NO_BEND],
     },
     Effect {
         tremolos: [
             NO_BEND,
             Bend { length: 31, rate: -2, pause: 1 },
         ],
-        vibrato: [
+        vibratos: [
             Bend { length: 80, rate: 80, pause: 0 },
             NO_BEND,
             NO_BEND,
@@ -280,7 +282,7 @@ const EFFECTS: [Effect; 23] = [
             NO_BEND,
             Bend { length: 22, rate: -2, pause: 1 },
         ],
-        vibrato: [
+        vibratos: [
             Bend { length: 60, rate: -60, pause: 0 },
             NO_BEND,
             NO_BEND,
@@ -288,7 +290,7 @@ const EFFECTS: [Effect; 23] = [
     },
     Effect {
         tremolos: [NO_BEND, NO_BEND],
-        vibrato: [
+        vibratos: [
             Bend { length: 80, rate: -80, pause: 0 },
             NO_BEND,
             NO_BEND,
@@ -296,7 +298,7 @@ const EFFECTS: [Effect; 23] = [
     },
     Effect {
         tremolos: [NO_BEND, NO_BEND],
-        vibrato: [
+        vibratos: [
             Bend { length: 10, rate: -15, pause: 0 },
             NO_BEND,
             NO_BEND,
@@ -307,7 +309,7 @@ const EFFECTS: [Effect; 23] = [
             NO_BEND,
             Bend { length: 40, rate: -1, pause: 0 },
         ],
-        vibrato: [
+        vibratos: [
             Bend { length: 90, rate: 90, pause: 0 },
             NO_BEND,
             NO_BEND,
