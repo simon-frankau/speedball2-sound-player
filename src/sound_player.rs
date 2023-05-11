@@ -21,6 +21,8 @@ use crate::sound_data::*;
 const NUM_SEQUENCES: usize = 78;
 const NUM_INSTRUMENTS: usize = 43;
 
+const MAX_VOLUME: f32 = 64.0;
+
 // TODO: Implement 000138b6 - 000145c6
 
 ////////////////////////////////////////////////////////////////////////
@@ -152,6 +154,7 @@ struct SampleChannel {
     bank: Arc<Mutex<SoundBank>>,
     instr: Option<Instrument>,
     volume: f32,
+    volume_adjust: f32,
     pitch: usize,
     pitch_adjust: i16,
     phase: f32,
@@ -164,6 +167,7 @@ impl SampleChannel {
             bank,
             instr: None,
             volume: 1.0,
+            volume_adjust: 0.0,
             pitch: 48 * 4,
             pitch_adjust: 0,
             phase: 0.0,
@@ -226,6 +230,8 @@ impl cpal_wrapper::SoundSource for SampleChannel {
         let time_step = self.calc_time_step();
         let step = 1.0 / (time_step * rate);
 
+        let vol = self.volume + self.volume_adjust;
+
         if let Some(instrument) = &mut self.instr {
             let mem = &self.bank.lock().unwrap().data;
             for elt in data.iter_mut() {
@@ -262,7 +268,7 @@ impl cpal_wrapper::SoundSource for SampleChannel {
                     mem[instrument.sample_addr + idx_int] as i8 as f32
                 };
 
-                *elt = (val / 128.0).to_sample::<T>();
+                *elt = (vol * val / 128.0).to_sample::<T>();
             }
         }
     }
@@ -321,6 +327,37 @@ impl EffectState {
             period_adjust: 0,
         }
     }
+
+    // Steps a sequence of bends, returns the delta to be applied to
+    // the relevant variable.
+    fn step(bends: &[Bend], bend_states: &mut [BendState]) -> i16 {
+        for (fx, fx_state) in bends.iter().zip(bend_states.iter_mut()) {
+            if fx_state.pause_count > 0 {
+                fx_state.pause_count -= 1;
+                continue;
+            }
+
+            if fx_state.length_count == 0 {
+                continue;
+            }
+            fx_state.length_count -= 1;
+            fx_state.pause_count = fx.pause;
+            return fx.rate;
+        }
+
+        for (dst, src) in bend_states.iter_mut().zip(bends.iter()) {
+            *dst = BendState::from(src);
+        }
+        0
+    }
+
+    fn step_tremolo(&mut self, effect: &Effect) {
+        self.period_adjust += EffectState::step(&effect.vibratos, &mut self.vibratos);
+    }
+
+    fn step_vibrato(&mut self, effect: &Effect) {
+        self.vol_adjust += EffectState::step(&effect.tremolos, &mut self.tremolos);
+    }
 }
 
 ////////////////////////////////////////////////////////////////////////
@@ -374,7 +411,7 @@ impl Sequence {
             }
             // New notes reset tremolo/vibrato state.
             self.effect_state = EffectState::from(self.effect);
-            channel.pitch = ((code as usize * 4).wrapping_add_signed(self.transposition));
+            channel.pitch = (code as usize * 4).wrapping_add_signed(self.transposition);
             channel.play(&bank.instruments[self.instrument_idx]);
             self.ttl = self.note_len;
             return EvalResult::Done;
@@ -385,11 +422,9 @@ impl Sequence {
                 // Set volume
                 let volume = bank.data[self.addr];
                 self.addr += 1;
-                // TODO: Should be chained with other processing.
                 if cfg!(debug) {
                     println!("Vol: {}", volume);
                 }
-                const MAX_VOLUME: f32 = 64.0;
                 channel.volume = volume as f32 / MAX_VOLUME;
             }
             0x8c => {
@@ -422,7 +457,9 @@ impl Sequence {
                 // Set effect
                 let effect = bank.data[self.addr];
                 self.addr += 1;
-                println!("Effect: {}", effect);
+                if cfg!(debug) {
+                    println!("Effect: {}", effect);
+                }
                 self.effect = EFFECTS[effect as usize];
                 self.effect_state = EffectState::new();
             }
@@ -480,7 +517,7 @@ impl Sequence {
     // Perform a timestep of the sequence, usually synchronised with a
     // vertical blanking interval. Returns whether the sequence
     // continues.
-    fn step_frame_instructions(&mut self, bank: &SoundBank, channel: &mut SampleChannel) -> bool {
+    fn update(&mut self, bank: &SoundBank, channel: &mut SampleChannel) -> bool {
         if self.ttl > 0 {
             return true;
         }
@@ -501,36 +538,6 @@ impl Sequence {
         }
     }
 
-    fn step_frame_effects(&mut self, bank: &SoundBank, channel: &mut SampleChannel) {
-        let mut acted = false;
-        for (fx, fx_state) in self
-            .effect
-            .vibratos
-            .iter()
-            .zip(self.effect_state.vibratos.iter_mut())
-        {
-            if fx_state.pause_count > 0 {
-                fx_state.pause_count -= 1;
-                continue;
-            }
-
-            if fx_state.length_count == 0 {
-                continue;
-            }
-            fx_state.length_count -= 1;
-            fx_state.pause_count = fx.pause;
-            self.effect_state.period_adjust += fx.rate;
-            acted = true;
-            break;
-        }
-        if !acted {
-            println!("Vib reset");
-            self.effect_state.vibratos = self.effect.vibratos.map(|x| BendState::from(&x));
-        }
-        channel.pitch_adjust = self.effect_state.period_adjust;
-        println!("PA: {}", channel.pitch_adjust);
-    }
-
     fn step_frame_envelope(&mut self, bank: &SoundBank, channel: &mut SampleChannel) {
         // TODO
     }
@@ -541,17 +548,21 @@ impl Sequence {
         channel: &mut SampleChannel,
         options: &Options,
     ) -> bool {
-        let continuing = self.step_frame_instructions(bank, channel);
-        if continuing {
+        let running = self.update(bank, channel);
+        if running {
             self.ttl -= 1;
             // TODO: Technically, if envelope is set, effects should be skipped.
             if options.tremolo {
-                // TODO!
-                self.step_frame_effects(bank, channel);
+                self.effect_state.step_tremolo(&self.effect);
+                channel.pitch_adjust = self.effect_state.period_adjust;
+            }
+            if options.vibrato {
+                self.effect_state.step_vibrato(&self.effect);
+                channel.volume_adjust = self.effect_state.vol_adjust as f32 / MAX_VOLUME;
             }
             self.step_frame_envelope(bank, channel);
         }
-        continuing
+        running
     }
 }
 
