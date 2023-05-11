@@ -24,6 +24,10 @@ const NUM_INSTRUMENTS: usize = 43;
 const MAX_VOLUME: f32 = 64.0;
 
 // TODO: Implement 000138b6 - 000145c6
+//  * sound_play
+//  * sound_envelope_channel
+//  * Remaining sound_update_channels
+//  * Remaining commands
 
 ////////////////////////////////////////////////////////////////////////
 // Utilities
@@ -194,6 +198,16 @@ impl SampleChannel {
         self.instr = None;
     }
 
+    // Special case: Stop the sound if the loop start is at zero. Why,
+    // I have no idea.
+    pub fn stop_loop(&mut self) {
+        if let Some(instrument) = &self.instr {
+            if instrument.loop_offset == 0 {
+                self.stop_hard();
+            }
+        }
+    }
+
     fn calc_time_step(&self) -> f32 {
         if let Some(instrument) = &self.instr {
             // This is PAL. 0.279365 for NTSC.
@@ -303,6 +317,8 @@ impl BendState {
 pub struct EffectState {
     tremolos: [BendState; 2],
     vibratos: [BendState; 3],
+    tremolo_loops: bool,
+    vibrato_loops: bool,
     vol_adjust: i16,
     period_adjust: i16,
 }
@@ -313,24 +329,25 @@ impl EffectState {
         EffectState {
             tremolos: [BendState::new(); 2],
             vibratos: [BendState::new(); 3],
+            tremolo_loops: false,
+            vibrato_loops: false,
             vol_adjust: 0,
             period_adjust: 0,
         }
     }
 
     // Used to reset state when playing new notes.
-    fn from(effect: Effect) -> EffectState {
-        EffectState {
-            tremolos: effect.tremolos.map(|x| BendState::from(&x)),
-            vibratos: effect.vibratos.map(|x| BendState::from(&x)),
-            vol_adjust: 0,
-            period_adjust: 0,
-        }
+    fn reset(&mut self, effect: &Effect) {
+        // NB: Keeps existing flags.
+        self.tremolos = effect.tremolos.map(|x| BendState::from(&x));
+        self.vibratos = effect.vibratos.map(|x| BendState::from(&x));
+        self.vol_adjust = 0;
+        self.period_adjust = 0;
     }
 
     // Steps a sequence of bends, returns the delta to be applied to
     // the relevant variable.
-    fn step(bends: &[Bend], bend_states: &mut [BendState]) -> i16 {
+    fn step(bends: &[Bend], bend_states: &mut [BendState], loops: bool) -> i16 {
         for (fx, fx_state) in bends.iter().zip(bend_states.iter_mut()) {
             if fx_state.pause_count > 0 {
                 fx_state.pause_count -= 1;
@@ -345,18 +362,23 @@ impl EffectState {
             return fx.rate;
         }
 
-        for (dst, src) in bend_states.iter_mut().zip(bends.iter()) {
-            *dst = BendState::from(src);
+        // Once we've reached the end, loop if the flag's set.
+        if loops {
+            for (dst, src) in bend_states.iter_mut().zip(bends.iter()) {
+                *dst = BendState::from(src);
+            }
         }
         0
     }
 
     fn step_tremolo(&mut self, effect: &Effect) {
-        self.period_adjust += EffectState::step(&effect.vibratos, &mut self.vibratos);
+        self.period_adjust +=
+            EffectState::step(&effect.vibratos, &mut self.vibratos, self.vibrato_loops);
     }
 
     fn step_vibrato(&mut self, effect: &Effect) {
-        self.vol_adjust += EffectState::step(&effect.tremolos, &mut self.tremolos);
+        self.vol_adjust +=
+            EffectState::step(&effect.tremolos, &mut self.tremolos, self.tremolo_loops);
     }
 }
 
@@ -385,7 +407,7 @@ enum EvalResult {
 
 impl Sequence {
     pub fn new(addr: usize) -> Sequence {
-        let effect = EFFECTS[0];
+        let no_effect = EFFECTS[0];
         Sequence {
             addr,
             frames_per_beat: 0,
@@ -393,8 +415,8 @@ impl Sequence {
             instrument_idx: 0,
             note_len: 0,
             ttl: 0,
-            effect,
-            effect_state: EffectState::from(effect),
+            effect: no_effect,
+            effect_state: EffectState::new(),
         }
     }
 
@@ -405,12 +427,12 @@ impl Sequence {
         self.addr += 1;
 
         if code < 0x80 {
-            // TODO: Reinitialise envelope.
             if cfg!(debug) {
                 println!("Note {}", code);
             }
+            // TODO: Reinitialise envelope.
             // New notes reset tremolo/vibrato state.
-            self.effect_state = EffectState::from(self.effect);
+            self.effect_state.reset(&self.effect);
             channel.pitch = (code as usize * 4).wrapping_add_signed(self.transposition);
             channel.play(&bank.instruments[self.instrument_idx]);
             self.ttl = self.note_len;
@@ -441,7 +463,7 @@ impl Sequence {
                 if cfg!(debug) {
                     println!("Rest");
                 }
-                // TODO: Should stop playing if loop-to-zero (!).
+                channel.stop_loop();
                 return EvalResult::Done;
             }
             0x94 => {
@@ -464,10 +486,14 @@ impl Sequence {
                 self.effect_state = EffectState::new();
             }
             0xa8 => {
-                // Loop flags
+                // Effects looping flags
                 let loop_flags = bank.data[self.addr];
                 self.addr += 1;
-                println!("Loop: {} (NYI)", loop_flags);
+		if cfg!(debug) {
+                    println!("Loop: {}", loop_flags);
+		}
+		self.effect_state.tremolo_loops = loop_flags & 1 != 0;
+		self.effect_state.vibrato_loops = loop_flags & 2 != 0;
             }
             0xac => {
                 // Stop
@@ -522,8 +548,6 @@ impl Sequence {
             return true;
         }
 
-        // TODO: Terminate sounds with loop offset of zero immediately (see `sound_update_chnanel`).
-
         let mut result = EvalResult::Cont;
         while result == EvalResult::Cont {
             result = self.eval(bank, channel);
@@ -571,10 +595,7 @@ impl Sequence {
 //
 
 // TODO: Features to emulate:
-// * sound_effects and sound_op_effect
 // * sound_envelopes and sound_op_set_envelope
-// * sound_update every 50th of a second.
-//   * sound_update_hardware_channel for basic move-along.
 // * Mixing together the multiple channels, etc.
 
 pub struct Options {
