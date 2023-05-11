@@ -524,6 +524,30 @@ impl Sequence {
                 channel.stop_hard();
                 return EvalResult::Stop;
             }
+            0xb0 => {
+                // Call
+                let seq_idx = bank.data[self.addr];
+                self.addr += 1;
+                if cfg!(debug) {
+                    println!("Call: {}", seq_idx);
+                }
+                self.loop_stack.push((0, self.addr));
+		self.addr = bank.sequences[seq_idx as usize];
+            }
+            0xb4 => {
+                // Return
+                if cfg!(debug) {
+                    println!("Return");
+                }
+		if let Some((i, ret_addr)) = self.loop_stack.pop() {
+		    assert_eq!(i, 0, "Return doesn't match call");
+		    self.addr = ret_addr;
+		} else {
+		    // Treat a return on a sequence that we've played
+		    // directly as end-of-sequence.
+		    return EvalResult::Stop;
+		}
+            }
             0xb8 => {
                 // Add transposition
                 let transposition = bank.data[self.addr] as i8;
