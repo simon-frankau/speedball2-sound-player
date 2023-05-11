@@ -395,6 +395,7 @@ impl EffectState {
 
 pub struct Sequence {
     addr: usize,
+    start_addr: usize,
     frames_per_beat: usize,
     transposition: isize,
     instrument_idx: usize,
@@ -402,6 +403,7 @@ pub struct Sequence {
     ttl: usize,
     effect: Effect,
     effect_state: EffectState,
+    loop_stack: Vec<(u8, usize)>,
 }
 
 #[derive(Eq, PartialEq)]
@@ -416,6 +418,7 @@ impl Sequence {
         let no_effect = EFFECTS[0];
         Sequence {
             addr,
+            start_addr: addr,
             frames_per_beat: 0,
             transposition: 0,
             instrument_idx: 0,
@@ -423,6 +426,7 @@ impl Sequence {
             ttl: 0,
             effect: no_effect,
             effect_state: EffectState::new(),
+            loop_stack: Vec::new(),
         }
     }
 
@@ -454,6 +458,13 @@ impl Sequence {
                     println!("Vol: {}", volume);
                 }
                 channel.volume = volume as f32 / MAX_VOLUME;
+            }
+            0x88 => {
+                // Go back to start
+                if cfg!(debug) {
+                    println!("Restart");
+                }
+                self.addr = self.start_addr;
             }
             0x8c => {
                 // Set note length
@@ -509,6 +520,19 @@ impl Sequence {
                 channel.stop_hard();
                 return EvalResult::Stop;
             }
+            0xb8 => {
+                // Add transposition
+                let transposition = bank.data[self.addr] as i8;
+                self.addr += 1;
+                if cfg!(debug) {
+                    println!("TransRel: {}", transposition);
+                }
+                if transposition == 0 {
+                    self.transposition = 0;
+                } else {
+                    self.transposition += transposition as isize;
+                }
+            }
             0xbc => {
                 // Set transposition
                 let transposition = bank.data[self.addr] as i8;
@@ -517,6 +541,28 @@ impl Sequence {
                     println!("Trans: {}", transposition);
                 }
                 self.transposition = transposition as isize;
+            }
+            0xc0 => {
+                // For loop
+                let count = bank.data[self.addr];
+                self.addr += 1;
+                if cfg!(debug) {
+                    println!("For: {}", count);
+                }
+                self.loop_stack.push((count, self.addr));
+            }
+            0xc4 => {
+                // Next
+                if cfg!(debug) {
+                    println!("Next");
+                }
+                let (count, loop_addr) = self.loop_stack.last_mut().unwrap();
+                if *count == 0 {
+                    self.loop_stack.pop();
+                } else {
+                    *count -= 1;
+                    self.addr = *loop_addr;
+                }
             }
             0xd0 => {
                 // Set instrument
