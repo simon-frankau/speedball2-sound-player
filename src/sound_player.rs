@@ -112,40 +112,46 @@ impl SoundBank {
     }
 
     pub fn ui(&mut self, ui: &mut Ui, channel: &mut SoundChannel) {
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            for (idx, instrument) in self.instruments.iter().enumerate() {
-                CollapsingHeader::new(format!("Instrument {:02x}", idx))
-                    .default_open(true)
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            if ui
-                                .add(Button::new("Play").fill(Color32::DARK_RED))
-                                .clicked()
-                            {
-                                channel.play_instr(instrument);
-                            }
-                            ui.label(&format!("{:?}", instrument));
+        CollapsingHeader::new(format!("Instruments"))
+            .default_open(false)
+            .show(ui, |ui| {
+                for (idx, instrument) in self.instruments.iter().enumerate() {
+                    CollapsingHeader::new(format!("Instrument {:02x}", idx))
+                        .default_open(true)
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                if ui
+                                    .add(Button::new("Play").fill(Color32::DARK_RED))
+                                    .clicked()
+                                {
+                                    channel.play_instr(instrument);
+                                }
+                                ui.label(&format!("{:?}", instrument));
+                            });
                         });
-                    });
-            }
+                }
+            });
 
-            for (idx, addr) in self.sequences.iter().enumerate() {
-                CollapsingHeader::new(format!("Sequence {:02x}", idx))
-                    .default_open(true)
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            if ui
-                                .add(Button::new("Play").fill(Color32::DARK_RED))
-                                .clicked()
-                            {
-                                println!("Playing sequence {:x}", idx);
-                                channel.play_seq(*addr);
-                            }
-                            ui.label(&format!("0x{:06x}", addr));
+        CollapsingHeader::new(format!("Sequences"))
+            .default_open(true)
+            .show(ui, |ui| {
+                for (idx, addr) in self.sequences.iter().enumerate() {
+                    CollapsingHeader::new(format!("Sequence {:02x}", idx))
+                        .default_open(true)
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                if ui
+                                    .add(Button::new("Play").fill(Color32::DARK_RED))
+                                    .clicked()
+                                {
+                                    println!("Playing sequence {:x}", idx);
+                                    channel.play_seq(*addr);
+                                }
+                                ui.label(&format!("0x{:06x}", addr));
+                            });
                         });
-                    });
-            }
-        });
+                }
+            });
     }
 }
 
@@ -489,11 +495,11 @@ impl Sequence {
                 // Effects looping flags
                 let loop_flags = bank.data[self.addr];
                 self.addr += 1;
-		if cfg!(debug) {
+                if cfg!(debug) {
                     println!("Loop: {}", loop_flags);
-		}
-		self.effect_state.tremolo_loops = loop_flags & 1 != 0;
-		self.effect_state.vibrato_loops = loop_flags & 2 != 0;
+                }
+                self.effect_state.tremolo_loops = loop_flags & 1 != 0;
+                self.effect_state.vibrato_loops = loop_flags & 2 != 0;
             }
             0xac => {
                 // Stop

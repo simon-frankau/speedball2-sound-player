@@ -45,7 +45,12 @@ impl App for PlayerApp {
         CentralPanel::default().show(ctx, |ui| {
             let mut channel = self.channel.lock().unwrap();
             channel.ui(ui);
-            self.bank.lock().unwrap().ui(ui, &mut channel);
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    // Instruments and Sequences.
+                    self.bank.lock().unwrap().ui(ui, &mut channel);
+                });
         });
     }
 }
