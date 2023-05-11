@@ -18,8 +18,12 @@ use crate::cpal_wrapper;
 use crate::sound_data::*;
 
 // TODO: Not in the data, afaict.
-const NUM_SEQUENCES: usize = 78;
-const NUM_INSTRUMENTS: usize = 43;
+// const NUM_SEQUENCES: usize = 78;
+// const NUM_INSTRUMENTS: usize = 43;
+
+// TODO: From the intro.
+const NUM_SEQUENCES: usize = 27;
+const NUM_INSTRUMENTS: usize = 40;
 
 const MAX_VOLUME: f32 = 64.0;
 
