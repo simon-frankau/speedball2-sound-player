@@ -9,19 +9,12 @@ sounds?
 
 ## TODO
 
-
- * Extract the sounds into standalone files separate from the main
-   game.
- * Build tooling to extract the sound data into appropriate data
-   structures.
- * Start playing sounds
-   * Add envelopes
-   * Add missing bytecode functionality
-   * And then multi-channel sounds
-   * wav export may also be nice
-   * I've been thinking about serialising user notes with... dunno,
-     serde, or something?
-   * Sample waveform visualisation might be nice.
+ * And then multi-channel sounds
+   * Stereo mixing!
+ * wav export may also be nice
+ * I've been thinking about serialising user notes with... dunno,
+   serde, or something?
+ * Sample waveform visualisation might be nice.
 
 ## Data
 
@@ -34,8 +27,6 @@ sounds?
    skip=0x1bbba count=0x2d9fc`. I then overwrite offset 0x29df2 from
    0x1146 to 0x0c64 in order to stop the sample for Instrument 39 from
    reading into data structures/code.
-   
-TODO: Need the intro music.
 
 TODO: `sound_table`, which glues together the sequences across
 multiple channels, is not in this memory range. I will need it later.
@@ -48,3 +39,8 @@ read out of range and die. You have been warned!
 It is not efficient. This makes me feel pretty bad, but given that in
 practice it's not performance-critical, I'm trying to err on the side
 of easy-to-read rather than efficient.
+
+I only implement the features used in the actual sounds (I don't want
+to put in unnecessary work to build features that are hard to
+test. This means that I'm not implementing ADSR envelopes, or a few of
+the more obscure byte codes (most of which are just no-ops!)..

@@ -29,9 +29,6 @@ const MAX_VOLUME: f32 = 64.0;
 
 // TODO: Implement 000138b6 - 000145c6
 //  * sound_play
-//  * sound_envelope_channel
-//  * Remaining sound_update_channels
-//  * Remaining commands
 
 ////////////////////////////////////////////////////////////////////////
 // Utilities
@@ -436,7 +433,12 @@ impl Sequence {
 
     // Run a single command in the command sequence. Implements
     // `sound_next_command`.
-    fn eval(&mut self, bank: &SoundBank, channel: &mut SampleChannel) -> EvalResult {
+    fn eval(
+        &mut self,
+        bank: &SoundBank,
+        channel: &mut SampleChannel,
+        options: &Options,
+    ) -> EvalResult {
         let code = bank.data[self.addr];
         self.addr += 1;
 
@@ -444,7 +446,10 @@ impl Sequence {
             if cfg!(debug) {
                 println!("Note {}", code);
             }
-            // TODO: Reinitialise envelope.
+
+            // If envelopes were implemented, they would be
+            // reinitialised here.
+
             // New notes reset tremolo/vibrato state.
             self.effect_state.reset(&self.effect);
             channel.pitch = (code as usize * 4).wrapping_add_signed(self.transposition);
@@ -467,6 +472,9 @@ impl Sequence {
                 // Go back to start
                 if cfg!(debug) {
                     println!("Restart");
+                }
+                if !options.repeats {
+                    return EvalResult::Done;
                 }
                 self.addr = self.start_addr;
             }
@@ -521,7 +529,6 @@ impl Sequence {
                 if cfg!(debug) {
                     println!("Stop");
                 }
-                channel.stop_hard();
                 return EvalResult::Stop;
             }
             0xb0 => {
@@ -532,21 +539,21 @@ impl Sequence {
                     println!("Call: {}", seq_idx);
                 }
                 self.loop_stack.push((0, self.addr));
-		self.addr = bank.sequences[seq_idx as usize];
+                self.addr = bank.sequences[seq_idx as usize];
             }
             0xb4 => {
                 // Return
                 if cfg!(debug) {
                     println!("Return");
                 }
-		if let Some((i, ret_addr)) = self.loop_stack.pop() {
-		    assert_eq!(i, 0, "Return doesn't match call");
-		    self.addr = ret_addr;
-		} else {
-		    // Treat a return on a sequence that we've played
-		    // directly as end-of-sequence.
-		    return EvalResult::Stop;
-		}
+                if let Some((i, ret_addr)) = self.loop_stack.pop() {
+                    assert_eq!(i, 0, "Return doesn't match call");
+                    self.addr = ret_addr;
+                } else {
+                    // Treat a return on a sequence that we've played
+                    // directly as end-of-sequence.
+                    return EvalResult::Stop;
+                }
             }
             0xb8 => {
                 // Add transposition
@@ -623,14 +630,14 @@ impl Sequence {
     // Perform a timestep of the sequence, usually synchronised with a
     // vertical blanking interval. Returns whether the sequence
     // continues.
-    fn update(&mut self, bank: &SoundBank, channel: &mut SampleChannel) -> bool {
+    fn update(&mut self, bank: &SoundBank, channel: &mut SampleChannel, options: &Options) -> bool {
         if self.ttl > 0 {
             return true;
         }
 
         let mut result = EvalResult::Cont;
         while result == EvalResult::Cont {
-            result = self.eval(bank, channel);
+            result = self.eval(bank, channel, options);
         }
 
         self.ttl = self.note_len;
@@ -638,12 +645,9 @@ impl Sequence {
         if result == EvalResult::Done {
             true
         } else {
+            channel.stop_hard();
             false
         }
-    }
-
-    fn step_frame_envelope(&mut self, bank: &SoundBank, channel: &mut SampleChannel) {
-        // TODO
     }
 
     fn step_frame(
@@ -652,10 +656,12 @@ impl Sequence {
         channel: &mut SampleChannel,
         options: &Options,
     ) -> bool {
-        let running = self.update(bank, channel);
+        let running = self.update(bank, channel, options);
         if running {
             self.ttl -= 1;
-            // TODO: Technically, if envelope is set, effects should be skipped.
+            // If envelope were implemented, it would go here, and
+            // based on the assembly code, an envelope would disable
+            // the effects.
             if options.tremolo {
                 self.effect_state.step_tremolo(&self.effect);
                 channel.pitch_adjust = self.effect_state.period_adjust;
@@ -664,7 +670,6 @@ impl Sequence {
                 self.effect_state.step_vibrato(&self.effect);
                 channel.volume_adjust = self.effect_state.vol_adjust as f32 / MAX_VOLUME;
             }
-            self.step_frame_envelope(bank, channel);
         }
         running
     }
@@ -675,12 +680,12 @@ impl Sequence {
 //
 
 // TODO: Features to emulate:
-// * sound_envelopes and sound_op_set_envelope
 // * Mixing together the multiple channels, etc.
 
 pub struct Options {
     tremolo: bool,
     vibrato: bool,
+    repeats: bool,
 }
 
 impl Options {
@@ -688,12 +693,14 @@ impl Options {
         Options {
             tremolo: true,
             vibrato: true,
+            repeats: true,
         }
     }
 
     fn ui(&mut self, ui: &mut Ui) {
         ui.checkbox(&mut self.tremolo, "Tremolo");
         ui.checkbox(&mut self.vibrato, "Vibrato");
+        ui.checkbox(&mut self.repeats, "Repeats");
     }
 }
 
@@ -732,10 +739,12 @@ impl SoundChannel {
 
     pub fn ui(&mut self, ui: &mut Ui) {
         ui.horizontal(|ui| {
-            if ui
-                .add(Button::new("Stop").fill(Color32::DARK_RED))
-                .clicked()
-            {
+            let stop_colour = if self.sequence.is_some() || self.sample_channel.instr.is_some() {
+                Color32::DARK_RED
+            } else {
+                Color32::DARK_GRAY
+            };
+            if ui.add(Button::new("Stop").fill(stop_colour)).clicked() {
                 self.stop();
             }
             ui.checkbox(&mut self.sample_channel.lerp, "Linear interpolation");
@@ -743,6 +752,8 @@ impl SoundChannel {
             ui.add(DragValue::new(&mut self.sample_channel.volume));
             ui.label("Pitch");
             ui.add(DragValue::new(&mut self.sample_channel.pitch));
+            ui.checkbox(&mut self.sample_channel.lerp, "Linear interpolation");
+
             self.options.ui(ui);
         });
     }
