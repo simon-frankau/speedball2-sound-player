@@ -17,18 +17,7 @@ use egui::{Button, CollapsingHeader, Color32, DragValue, RichText, Ui};
 use crate::cpal_wrapper;
 use crate::sound_data::*;
 
-// TODO: Not in the data, afaict.
-// const NUM_SEQUENCES: usize = 78;
-// const NUM_INSTRUMENTS: usize = 43;
-
-// TODO: From the intro.
-const NUM_SEQUENCES: usize = 27;
-const NUM_INSTRUMENTS: usize = 40;
-
 const MAX_VOLUME: f32 = 64.0;
-
-// TODO: Implement 000138b6 - 000145c6
-//  * sound_play
 
 ////////////////////////////////////////////////////////////////////////
 // Utilities
@@ -94,14 +83,14 @@ impl fmt::Debug for SoundBank {
 }
 
 impl SoundBank {
-    pub fn new(data: Vec<u8>) -> SoundBank {
+    pub fn new(data: Vec<u8>, num_sequences: usize, num_instruments: usize) -> SoundBank {
         let sequence_table_offset = long(&data, 0) as usize;
-        let sequences = (0..NUM_SEQUENCES)
+        let sequences = (0..num_sequences)
             .map(|idx| long(&data, sequence_table_offset + idx * 4) as usize)
             .collect();
 
         let instrument_table_offset = long(&data, 4) as usize;
-        let instruments = (0..NUM_INSTRUMENTS)
+        let instruments = (0..num_instruments)
             .map(|idx| Instrument::new(&data[(instrument_table_offset + idx * Instrument::SIZE)..]))
             .collect();
 
@@ -136,7 +125,8 @@ impl SoundBank {
         CollapsingHeader::new(format!("Sequences"))
             .default_open(false)
             .show(ui, |ui| {
-                for (idx, addr) in self.sequences.iter().enumerate() {
+                // Skip first element, the empty sequence.
+                for (idx, addr) in self.sequences.iter().enumerate().skip(1) {
                     CollapsingHeader::new(format!("Sequence {:02x}", idx))
                         .default_open(true)
                         .show(ui, |ui| {
@@ -804,11 +794,11 @@ impl Synth {
     }
 
     pub fn play_sound(&mut self, bank: &SoundBank, sound: &Sound) {
-	for (channel, seq) in self.channels.iter_mut().zip(sound.sequences.iter()) {
-	    if *seq != 0 {
-		channel.play_seq(bank.sequences[*seq]);
-	    }
-	}
+        for (channel, seq) in self.channels.iter_mut().zip(sound.sequences.iter()) {
+            if *seq != 0 {
+                channel.play_seq(bank.sequences[*seq]);
+            }
+        }
     }
 
     pub fn sound_ui(&mut self, bank: &SoundBank, ui: &mut Ui) {
@@ -824,7 +814,7 @@ impl Synth {
                                     .add(Button::new("Play").fill(Color32::DARK_RED))
                                     .clicked()
                                 {
-				    self.play_sound(bank, sound);
+                                    self.play_sound(bank, sound);
                                 }
                                 ui.label(&format!("{:?}", sound));
                             });
@@ -834,19 +824,19 @@ impl Synth {
     }
 
     pub fn ui(&mut self, bank: &mut SoundBank, ui: &mut Ui) {
-	for (idx, channel) in self.channels.iter_mut().enumerate() {
-	    // Cheap alignment.
-	    ui.label(RichText::new(format!("Ch {}", idx)).monospace());
+        for (idx, channel) in self.channels.iter_mut().enumerate() {
+            // Cheap alignment.
+            ui.label(RichText::new(format!("Ch {}", idx)).monospace());
             channel.ui(ui);
-	}
+        }
 
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 // Instruments and Sequences - use channel 0.
                 bank.ui(ui, &mut self.channels[0]);
-		// And sounds
-		self.sound_ui(bank, ui);
+                // And sounds
+                self.sound_ui(bank, ui);
             });
     }
 }

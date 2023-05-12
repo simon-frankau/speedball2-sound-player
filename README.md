@@ -7,6 +7,12 @@ stand-alone player for the sounds in Speedball II. After all, I've
 build tools to extract the graphics from the game, so why not the
 sounds?
 
+## To run
+
+From the top-level directory, run `cargo run -- game` to load all the
+in-game effects. To hear the title music, run `cargo run -- intro` and
+listen to sound 0x2c.
+
 ## TODO
 
  * Stereo mixing
@@ -27,6 +33,20 @@ sounds?
    0x1146 to 0x0c64 in order to stop the sample for Instrument 39 from
    reading into data structures/code.
 
+## Structure
+
+The Amiga has 4 sound channels. In the terminology I've built, the
+game plays Sounds, which are an assignment of Sequences to
+Channels. Sequences are byte code sequences that configure a channel
+and play sounds on them. The particular noise produced depends on the
+Instrument assigned to a channel. An Instrument will play a Sample in
+a particular way. It may have tremolo or vibrato Effects applied to
+it, or an ADSR Envelope applied. While the Amiga code supports
+Envelopes, they're not used by any of the Sequences here, so I've not
+implemented them.
+
+This interface allows you to play Sounds, Sequences and Instruments.
+
 ## The sounds
 
 The only sounds used in intro-mode are:
@@ -36,7 +56,7 @@ The only sounds used in intro-mode are:
  * 0x36: Teletype noise for printing characters (Sequence 19)
  * 0x37: Teletype noise to spaces (Sequence 20)
 
-TODO: Validity of sounds in game mode.
+All the other sounds are valid in game mode.
 
 ## Other notes
 
