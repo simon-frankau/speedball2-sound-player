@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 
 use cpal::Sample;
 
-use egui::{Button, CollapsingHeader, Color32, DragValue, Ui};
+use egui::{Button, CollapsingHeader, Color32, DragValue, RichText, Ui};
 
 use crate::cpal_wrapper;
 use crate::sound_data::*;
@@ -134,7 +134,7 @@ impl SoundBank {
             });
 
         CollapsingHeader::new(format!("Sequences"))
-            .default_open(true)
+            .default_open(false)
             .show(ui, |ui| {
                 for (idx, addr) in self.sequences.iter().enumerate() {
                     CollapsingHeader::new(format!("Sequence {:02x}", idx))
@@ -145,7 +145,6 @@ impl SoundBank {
                                     .add(Button::new("Play").fill(Color32::DARK_RED))
                                     .clicked()
                                 {
-                                    println!("Playing sequence {:x}", idx);
                                     channel.play_seq(*addr);
                                 }
                                 ui.label(&format!("0x{:06x}", addr));
@@ -230,15 +229,8 @@ impl SampleChannel {
             0.0
         }
     }
-}
 
-impl cpal_wrapper::SoundSource for SampleChannel {
-    fn fill_buffer<T: Sample + cpal::FromSample<f32> + std::ops::Add<Output = T>>(
-        &mut self,
-        num_channels: u16,
-        sample_rate: u32,
-        data: &mut [T],
-    ) {
+    fn fill_buffer(&mut self, num_channels: u16, sample_rate: u32, data: &mut [f32]) {
         // Simple base case.
         for elt in data.iter_mut() {
             *elt = Sample::EQUILIBRIUM;
@@ -289,7 +281,7 @@ impl cpal_wrapper::SoundSource for SampleChannel {
                     mem[instrument.sample_addr + idx_int] as i8 as f32
                 };
 
-                *elt = (vol * val / 128.0).to_sample::<T>();
+                *elt = vol * val / 128.0;
             }
         }
     }
@@ -757,15 +749,8 @@ impl SoundChannel {
             self.options.ui(ui);
         });
     }
-}
 
-impl cpal_wrapper::SoundSource for SoundChannel {
-    fn fill_buffer<T: Sample + cpal::FromSample<f32> + std::ops::Add<Output = T>>(
-        &mut self,
-        num_channels: u16,
-        sample_rate: u32,
-        data: &mut [T],
-    ) {
+    fn fill_buffer(&mut self, num_channels: u16, sample_rate: u32, data: &mut [f32]) {
         // Not going to try to do sub-sample accuracy.
         const FRAMES_PER_SECOND: usize = 50;
         let samples_per_frame = sample_rate as usize / FRAMES_PER_SECOND;
@@ -798,5 +783,92 @@ impl cpal_wrapper::SoundSource for SoundChannel {
         self.sample_channel
             .fill_buffer(num_channels, sample_rate, data);
         self.samples_remaining -= data.len() / ch;
+    }
+}
+
+////////////////////////////////////////////////////////////////////////
+// 4-channel synthesiser
+
+pub struct Synth {
+    pub channels: [SoundChannel; 4],
+    stereo: bool,
+}
+
+impl Synth {
+    pub fn new(bank: Arc<Mutex<SoundBank>>) -> Synth {
+        Synth {
+            // Simplest way I could find to do this!
+            channels: [(); 4].map(|()| SoundChannel::new(bank.clone())),
+            stereo: false,
+        }
+    }
+
+    pub fn play_sound(&mut self, bank: &SoundBank, sound: &Sound) {
+	for (channel, seq) in self.channels.iter_mut().zip(sound.sequences.iter()) {
+	    if *seq != 0 {
+		channel.play_seq(bank.sequences[*seq]);
+	    }
+	}
+    }
+
+    pub fn sound_ui(&mut self, bank: &SoundBank, ui: &mut Ui) {
+        CollapsingHeader::new(format!("Sounds"))
+            .default_open(true)
+            .show(ui, |ui| {
+                for (idx, sound) in SOUNDS.iter().enumerate() {
+                    CollapsingHeader::new(format!("Sound {:02x}", idx))
+                        .default_open(true)
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                if ui
+                                    .add(Button::new("Play").fill(Color32::DARK_RED))
+                                    .clicked()
+                                {
+				    self.play_sound(bank, sound);
+                                }
+                                ui.label(&format!("{:?}", sound));
+                            });
+                        });
+                }
+            });
+    }
+
+    pub fn ui(&mut self, bank: &mut SoundBank, ui: &mut Ui) {
+	for (idx, channel) in self.channels.iter_mut().enumerate() {
+	    // Cheap alignment.
+	    ui.label(RichText::new(format!("Ch {}", idx)).monospace());
+            channel.ui(ui);
+	}
+
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                // Instruments and Sequences - use channel 0.
+                bank.ui(ui, &mut self.channels[0]);
+		// And sounds
+		self.sound_ui(bank, ui);
+            });
+    }
+}
+
+impl cpal_wrapper::SoundSource for Synth {
+    fn fill_buffer<T: Sample + cpal::FromSample<f32> + std::ops::Add<Output = T>>(
+        &mut self,
+        num_channels: u16,
+        sample_rate: u32,
+        data: &mut [T],
+    ) {
+        data.fill(Sample::EQUILIBRIUM);
+
+        let mixer_scale = 1.0 / self.channels.len() as f32;
+
+        // TODO: Really dull way to do this. Need to do stereo.
+        let mut tmp = vec![0.0; data.len()];
+        for channel in self.channels.iter_mut() {
+            channel.fill_buffer(num_channels, sample_rate, &mut tmp);
+            for (dst, src) in data.iter_mut().zip(tmp.iter()) {
+                *dst = dst.add_amp((mixer_scale * src).to_sample::<T>().to_signed_sample());
+            }
+        }
     }
 }

@@ -29,28 +29,23 @@ struct Args {
 
 struct PlayerApp {
     bank: Arc<Mutex<sound_player::SoundBank>>,
-    channel: Arc<Mutex<sound_player::SoundChannel>>,
+    synth: Arc<Mutex<sound_player::Synth>>,
 }
 
 impl PlayerApp {
     fn new(bank: sound_player::SoundBank) -> PlayerApp {
         let bank = Arc::new(Mutex::new(bank));
-        let channel = Arc::new(Mutex::new(sound_player::SoundChannel::new(bank.clone())));
-        PlayerApp { bank, channel }
+        let synth = Arc::new(Mutex::new(sound_player::Synth::new(bank.clone())));
+        PlayerApp { bank, synth }
     }
 }
 
 impl App for PlayerApp {
     fn update(&mut self, ctx: &Context, _frame: &mut Frame) {
         CentralPanel::default().show(ctx, |ui| {
-            let mut channel = self.channel.lock().unwrap();
-            channel.ui(ui);
-            egui::ScrollArea::vertical()
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    // Instruments and Sequences.
-                    self.bank.lock().unwrap().ui(ui, &mut channel);
-                });
+            let mut synth = self.synth.lock().unwrap();
+	    let mut bank = self.bank.lock().unwrap();
+            synth.ui(&mut bank, ui);
         });
     }
 }
@@ -63,7 +58,7 @@ fn main() {
     let sound_bank = sound_player::SoundBank::new(data);
     let options = NativeOptions::default();
     let app = PlayerApp::new(sound_bank);
-    let _stream = cpal_wrapper::sound_init(app.channel.clone());
+    let _stream = cpal_wrapper::sound_init(app.synth.clone());
 
     eframe::run_native(
         "Speedball II Sound Player",

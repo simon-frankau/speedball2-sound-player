@@ -9,8 +9,7 @@ sounds?
 
 ## TODO
 
- * And then multi-channel sounds
-   * Stereo mixing!
+ * Stereo mixing
  * wav export may also be nice
  * I've been thinking about serialising user notes with... dunno,
    serde, or something?
@@ -28,8 +27,16 @@ sounds?
    0x1146 to 0x0c64 in order to stop the sample for Instrument 39 from
    reading into data structures/code.
 
-TODO: `sound_table`, which glues together the sequences across
-multiple channels, is not in this memory range. I will need it later.
+## The sounds
+
+The only sounds used in intro-mode are:
+
+ * 0x2c: Intro music (sequences 1, 2, 3, 4)
+ * 0x2d: Silence (sequences 0x18, 0x18, 0x18, 0x18)
+ * 0x36: Teletype noise for printing characters (Sequence 19)
+ * 0x37: Teletype noise to spaces (Sequence 20)
+
+TODO: Validity of sounds in game mode.
 
 ## Other notes
 
