@@ -12,6 +12,7 @@ use std::sync::{Arc, Mutex};
 
 use cpal::Sample;
 
+use egui::plot::{Line, Plot, PlotPoints, VLine};
 use egui::{Button, CollapsingHeader, Color32, DragValue, RichText, Ui};
 
 use crate::cpal_wrapper;
@@ -101,13 +102,38 @@ impl SoundBank {
         }
     }
 
+    fn instrument_plot_ui(&self, ui: &mut Ui, instrument: &Instrument, idx: usize) {
+        // This looks expensive, but only excecuted if the header is
+        // opened, so I don't care too much.
+        let sample = &self.data[instrument.sample_addr..][..instrument.sample_len as usize * 2];
+        let points = PlotPoints::new(
+            sample
+                .iter()
+                .enumerate()
+                .map(|(x, y)| [x as f64, *y as i8 as f64])
+                .collect::<Vec<_>>(),
+        );
+        let repeat_point = instrument.loop_offset;
+        // Disallow scrolling because it's inside a wider scrolling
+        // frame and you probably didn't mean to scroll.
+        Plot::new(format!("Sound {}", idx))
+            .view_aspect(10.0)
+            .allow_scroll(false)
+            .show(ui, |plot_ui| {
+                plot_ui.line(Line::new(points));
+                if repeat_point != 0 {
+                    plot_ui.vline(VLine::new(repeat_point as f64));
+                }
+            });
+    }
+
     pub fn ui(&mut self, ui: &mut Ui, channel: &mut SoundChannel) {
         CollapsingHeader::new("Instruments")
             .default_open(false)
             .show(ui, |ui| {
                 for (idx, instrument) in self.instruments.iter().enumerate() {
                     CollapsingHeader::new(format!("Instrument {:02x}", idx))
-                        .default_open(true)
+                        .default_open(false)
                         .show(ui, |ui| {
                             ui.horizontal(|ui| {
                                 if ui
@@ -118,6 +144,7 @@ impl SoundBank {
                                 }
                                 ui.label(&format!("{:?}", instrument));
                             });
+                            self.instrument_plot_ui(ui, instrument, idx);
                         });
                 }
             });

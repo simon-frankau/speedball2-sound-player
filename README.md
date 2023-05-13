@@ -27,8 +27,6 @@ All the other sounds are valid in game mode.
 ## TODO
 
  * wav export may also be nice
- * I've been thinking about serialising user notes with... dunno,
-   serde, or something?
  * Sample waveform visualisation might be nice.
 
 ## Data
@@ -65,6 +63,11 @@ read out of range and die. You have been warned!
 It is not efficient. This makes me feel pretty bad, but given that in
 practice it's not performance-critical, I'm trying to err on the side
 of easy-to-read rather than efficient.
+
+Graph-drawing is particularly expensive, since it's being done
+dynamically every frame (!) and I can't be bothered to optimise. If
+you open too many Instrument fold-ups at once, the sound may start to
+break up!
 
 I only implement the features used in the actual sounds (I don't want
 to put in unnecessary work to build features that are hard to
