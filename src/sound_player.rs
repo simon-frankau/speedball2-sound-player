@@ -102,7 +102,7 @@ impl SoundBank {
     }
 
     pub fn ui(&mut self, ui: &mut Ui, channel: &mut SoundChannel) {
-        CollapsingHeader::new(format!("Instruments"))
+        CollapsingHeader::new("Instruments")
             .default_open(false)
             .show(ui, |ui| {
                 for (idx, instrument) in self.instruments.iter().enumerate() {
@@ -122,7 +122,7 @@ impl SoundBank {
                 }
             });
 
-        CollapsingHeader::new(format!("Sequences"))
+        CollapsingHeader::new("Sequences")
             .default_open(false)
             .show(ui, |ui| {
                 // Skip first element, the empty sequence.
@@ -743,9 +743,9 @@ impl SoundChannel {
 
         let mut data = data;
         // Fill buffer until we hit a new frame, repeat.
-        while data.len() as usize >= self.samples_remaining {
+        while data.len() >= self.samples_remaining {
             self.sample_channel
-                .fill_buffer(sample_rate, &mut data[..self.samples_remaining as usize]);
+                .fill_buffer(sample_rate, &mut data[..self.samples_remaining]);
 
             if let Some(sequence) = &mut self.sequence {
                 if !sequence.step_frame(
@@ -793,7 +793,7 @@ impl Synth {
     }
 
     pub fn sound_ui(&mut self, bank: &SoundBank, ui: &mut Ui) {
-        CollapsingHeader::new(format!("Sounds"))
+        CollapsingHeader::new("Sounds")
             .default_open(true)
             .show(ui, |ui| {
                 for (idx, sound) in SOUNDS.iter().enumerate() {
