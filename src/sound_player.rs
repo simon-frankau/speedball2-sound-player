@@ -220,18 +220,14 @@ impl SampleChannel {
         }
     }
 
-    fn fill_buffer(&mut self, num_channels: u16, sample_rate: u32, data: &mut [f32]) {
+    fn fill_buffer(&mut self, sample_rate: u32, data: &mut [f32]) {
         // Simple base case.
         for elt in data.iter_mut() {
             *elt = Sample::EQUILIBRIUM;
         }
 
-        // Treating multiple channels as single channel at a
-        // higher frequency is wrong, but will do until I write
-        // the mixer.
-        let rate = sample_rate as f32 * num_channels as f32;
         let time_step = self.calc_time_step();
-        let step = 1.0 / (time_step * rate);
+        let step = 1.0 / (time_step * sample_rate as f32);
 
         let vol = self.volume + self.volume_adjust;
 
@@ -740,20 +736,16 @@ impl SoundChannel {
         });
     }
 
-    fn fill_buffer(&mut self, num_channels: u16, sample_rate: u32, data: &mut [f32]) {
+    fn fill_buffer(&mut self, sample_rate: u32, data: &mut [f32]) {
         // Not going to try to do sub-sample accuracy.
         const FRAMES_PER_SECOND: usize = 50;
         let samples_per_frame = sample_rate as usize / FRAMES_PER_SECOND;
-        let ch = num_channels as usize;
 
         let mut data = data;
         // Fill buffer until we hit a new frame, repeat.
-        while data.len() / ch as usize >= self.samples_remaining {
-            self.sample_channel.fill_buffer(
-                num_channels,
-                sample_rate,
-                &mut data[..self.samples_remaining * ch as usize],
-            );
+        while data.len() as usize >= self.samples_remaining {
+            self.sample_channel
+                .fill_buffer(sample_rate, &mut data[..self.samples_remaining as usize]);
 
             if let Some(sequence) = &mut self.sequence {
                 if !sequence.step_frame(
@@ -765,14 +757,13 @@ impl SoundChannel {
                 }
             }
 
-            data = &mut data[self.samples_remaining * ch..];
+            data = &mut data[self.samples_remaining..];
             self.samples_remaining = samples_per_frame;
         }
 
         // And fill any leftover.
-        self.sample_channel
-            .fill_buffer(num_channels, sample_rate, data);
-        self.samples_remaining -= data.len() / ch;
+        self.sample_channel.fill_buffer(sample_rate, data);
+        self.samples_remaining -= data.len();
     }
 }
 
@@ -789,7 +780,7 @@ impl Synth {
         Synth {
             // Simplest way I could find to do this!
             channels: [(); 4].map(|()| SoundChannel::new(bank.clone())),
-            stereo: false,
+            stereo: true,
         }
     }
 
@@ -824,6 +815,9 @@ impl Synth {
     }
 
     pub fn ui(&mut self, bank: &mut SoundBank, ui: &mut Ui) {
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut self.stereo, "Stereo");
+        });
         for (idx, channel) in self.channels.iter_mut().enumerate() {
             // Cheap alignment.
             ui.label(RichText::new(format!("Ch {}", idx)).monospace());
@@ -851,13 +845,28 @@ impl cpal_wrapper::SoundSource for Synth {
         data.fill(Sample::EQUILIBRIUM);
 
         let mixer_scale = 1.0 / self.channels.len() as f32;
+        let mut tmp = vec![0.0; data.len() / num_channels as usize];
 
-        // TODO: Really dull way to do this. Need to do stereo.
-        let mut tmp = vec![0.0; data.len()];
-        for channel in self.channels.iter_mut() {
-            channel.fill_buffer(num_channels, sample_rate, &mut tmp);
-            for (dst, src) in data.iter_mut().zip(tmp.iter()) {
-                *dst = dst.add_amp((mixer_scale * src).to_sample::<T>().to_signed_sample());
+        if self.stereo && num_channels > 1 {
+            for (ch_idx, channel) in self.channels.iter_mut().enumerate() {
+                channel.fill_buffer(sample_rate, &mut tmp);
+                // Odd channels on left, even channels on right.
+                let offset = ch_idx & 1;
+                // Build an iterator for exactly where we'll be writing.
+                let dst_iter = data.iter_mut().skip(offset).step_by(num_channels as usize);
+                for (dst, src) in dst_iter.zip(tmp.iter()) {
+                    *dst = dst.add_amp((mixer_scale * src).to_sample::<T>().to_signed_sample());
+                }
+            }
+        } else {
+            // Mono: repeat the sample.
+            for channel in self.channels.iter_mut() {
+                channel.fill_buffer(sample_rate, &mut tmp);
+                for (dsts, src) in data.chunks_mut(num_channels as usize).zip(tmp.iter()) {
+                    for dst in dsts.iter_mut() {
+                        *dst = dst.add_amp((mixer_scale * src).to_sample::<T>().to_signed_sample());
+                    }
+                }
             }
         }
     }

@@ -13,9 +13,19 @@ From the top-level directory, run `cargo run -- game` to load all the
 in-game effects. To hear the title music, run `cargo run -- intro` and
 listen to sound 0x2c.
 
+## The sounds
+
+The only sounds used in intro-mode are:
+
+ * 0x2c: Intro music (sequences 1, 2, 3, 4)
+ * 0x2d: Silence (sequences 0x18, 0x18, 0x18, 0x18)
+ * 0x36: Teletype noise for printing characters (Sequence 19)
+ * 0x37: Teletype noise to spaces (Sequence 20)
+
+All the other sounds are valid in game mode.
+
 ## TODO
 
- * Stereo mixing
  * wav export may also be nice
  * I've been thinking about serialising user notes with... dunno,
    serde, or something?
@@ -47,17 +57,6 @@ implemented them.
 
 This interface allows you to play Sounds, Sequences and Instruments.
 
-## The sounds
-
-The only sounds used in intro-mode are:
-
- * 0x2c: Intro music (sequences 1, 2, 3, 4)
- * 0x2d: Silence (sequences 0x18, 0x18, 0x18, 0x18)
- * 0x36: Teletype noise for printing characters (Sequence 19)
- * 0x37: Teletype noise to spaces (Sequence 20)
-
-All the other sounds are valid in game mode.
-
 ## Other notes
 
 This code is not defensive. If you feed it bad data, it will try to
@@ -71,3 +70,11 @@ I only implement the features used in the actual sounds (I don't want
 to put in unnecessary work to build features that are hard to
 test. This means that I'm not implementing ADSR envelopes, or a few of
 the more obscure byte codes (most of which are just no-ops!)..
+
+The Amiga implementation is modular/well-encapsulated, has features
+not actually used by Speedball 2, and generally looks quite
+re-usable. As such, I've taken a look at some of the other Bitmap
+Brothers hits to see if my reversing here helps there, and... they use
+different mechanisms to play their music. Magic Pockets and Gods use
+an embedded mod file, while Xenon 2 uses a music player with different
+bytecode. Oh well!
