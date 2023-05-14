@@ -8,7 +8,7 @@
 //
 
 use std::fmt;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use cpal::Sample;
 
@@ -127,7 +127,7 @@ impl SoundBank {
             });
     }
 
-    pub fn ui(&mut self, ui: &mut Ui, channel: &mut SoundChannel) {
+    pub fn ui(&self, ui: &mut Ui, synth: &mut Synth) {
         CollapsingHeader::new("Instruments")
             .default_open(false)
             .show(ui, |ui| {
@@ -140,7 +140,7 @@ impl SoundBank {
                                     .add(Button::new("Play").fill(Color32::DARK_RED))
                                     .clicked()
                                 {
-                                    channel.play_instr(instrument);
+                                    synth.play_instr(instrument);
                                 }
                                 ui.label(&format!("{:?}", instrument));
                             });
@@ -162,7 +162,7 @@ impl SoundBank {
                                     .add(Button::new("Play").fill(Color32::DARK_RED))
                                     .clicked()
                                 {
-                                    channel.play_seq(*addr);
+                                    synth.play_seq(idx);
                                 }
                                 ui.label(&format!("0x{:06x}", addr));
                             });
@@ -178,7 +178,7 @@ impl SoundBank {
 //
 
 struct SampleChannel {
-    bank: Arc<Mutex<SoundBank>>,
+    bank: Arc<SoundBank>,
     instr: Option<Instrument>,
     volume: f32,
     volume_adjust: f32,
@@ -189,7 +189,7 @@ struct SampleChannel {
 }
 
 impl SampleChannel {
-    pub fn new(bank: Arc<Mutex<SoundBank>>) -> SampleChannel {
+    pub fn new(bank: Arc<SoundBank>) -> SampleChannel {
         SampleChannel {
             bank,
             instr: None,
@@ -259,7 +259,7 @@ impl SampleChannel {
         let vol = self.volume + self.volume_adjust;
 
         if let Some(instrument) = &mut self.instr {
-            let mem = &self.bank.lock().unwrap().data;
+            let mem = &self.bank.data;
             for elt in data.iter_mut() {
                 self.phase += step;
                 let mut idx_int = self.phase as usize;
@@ -684,9 +684,6 @@ impl Sequence {
 // Sound channel capable of playing a sound.
 //
 
-// TODO: Features to emulate:
-// * Mixing together the multiple channels, etc.
-
 pub struct Options {
     tremolo: bool,
     vibrato: bool,
@@ -710,7 +707,7 @@ impl Options {
 }
 
 pub struct SoundChannel {
-    bank: Arc<Mutex<SoundBank>>,
+    bank: Arc<SoundBank>,
     sample_channel: SampleChannel,
     samples_remaining: usize,
     sequence: Option<Sequence>,
@@ -718,7 +715,7 @@ pub struct SoundChannel {
 }
 
 impl SoundChannel {
-    pub fn new(bank: Arc<Mutex<SoundBank>>) -> SoundChannel {
+    pub fn new(bank: Arc<SoundBank>) -> SoundChannel {
         let sample_channel = SampleChannel::new(bank.clone());
         SoundChannel {
             bank,
@@ -734,7 +731,8 @@ impl SoundChannel {
     }
 
     pub fn play_seq(&mut self, seq: usize) {
-        self.sequence = Some(Sequence::new(seq));
+        let addr = self.bank.sequences[seq];
+        self.sequence = Some(Sequence::new(addr));
     }
 
     pub fn stop(&mut self) {
@@ -775,11 +773,7 @@ impl SoundChannel {
                 .fill_buffer(sample_rate, &mut data[..self.samples_remaining]);
 
             if let Some(sequence) = &mut self.sequence {
-                if !sequence.step_frame(
-                    &self.bank.lock().unwrap(),
-                    &mut self.sample_channel,
-                    &self.options,
-                ) {
+                if !sequence.step_frame(&self.bank, &mut self.sample_channel, &self.options) {
                     self.sequence = None;
                 }
             }
@@ -797,29 +791,52 @@ impl SoundChannel {
 ////////////////////////////////////////////////////////////////////////
 // 4-channel synthesiser
 
+#[derive(Debug, PartialEq, Eq)]
+enum PlayMode {
+    Speakers,
+    WaveFile,
+}
+
 pub struct Synth {
     pub channels: [SoundChannel; 4],
+    bank: Arc<SoundBank>,
     stereo: bool,
+    play_mode: PlayMode,
+    max_len: f32,
 }
 
 impl Synth {
-    pub fn new(bank: Arc<Mutex<SoundBank>>) -> Synth {
+    pub fn new(bank: Arc<SoundBank>) -> Synth {
         Synth {
             // Simplest way I could find to do this!
             channels: [(); 4].map(|()| SoundChannel::new(bank.clone())),
+            bank,
             stereo: true,
+            play_mode: PlayMode::Speakers,
+            max_len: 3.0,
         }
     }
 
-    pub fn play_sound(&mut self, bank: &SoundBank, sound: &Sound) {
+    pub fn play_instr(&mut self, instr: &Instrument) {
+        // TODO: Divert to wavefile.
+        self.channels[0].play_instr(instr);
+    }
+
+    pub fn play_seq(&mut self, idx: usize) {
+        // TODO: Divert to wavefile.
+        self.channels[0].play_seq(idx);
+    }
+
+    pub fn play_sound(&mut self, sound: &Sound) {
+        // TODO: Divert to wavefile.
         for (channel, seq) in self.channels.iter_mut().zip(sound.sequences.iter()) {
             if *seq != 0 {
-                channel.play_seq(bank.sequences[*seq]);
+                channel.play_seq(*seq);
             }
         }
     }
 
-    pub fn sound_ui(&mut self, bank: &SoundBank, ui: &mut Ui) {
+    pub fn sound_ui(&mut self, ui: &mut Ui) {
         CollapsingHeader::new("Sounds")
             .default_open(true)
             .show(ui, |ui| {
@@ -832,7 +849,7 @@ impl Synth {
                                     .add(Button::new("Play").fill(Color32::DARK_RED))
                                     .clicked()
                                 {
-                                    self.play_sound(bank, sound);
+                                    self.play_sound(sound);
                                 }
                                 ui.label(&format!("{:?}", sound));
                             });
@@ -841,23 +858,38 @@ impl Synth {
             });
     }
 
-    pub fn ui(&mut self, bank: &mut SoundBank, ui: &mut Ui) {
+    pub fn ui(&mut self, ui: &mut Ui) {
         ui.horizontal(|ui| {
             ui.checkbox(&mut self.stereo, "Stereo");
+            ui.label("Output to");
+            egui::ComboBox::from_id_source("PlayMode")
+                .selected_text(format!("{:?}", self.play_mode))
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut self.play_mode, PlayMode::Speakers, "Speakers");
+                    ui.selectable_value(&mut self.play_mode, PlayMode::WaveFile, "WaveFile");
+                });
+            if self.play_mode == PlayMode::WaveFile {
+                ui.label("up to");
+                ui.add(DragValue::new(&mut self.max_len).speed(0.1));
+                ui.label("seconds");
+            }
         });
         for (idx, channel) in self.channels.iter_mut().enumerate() {
-            // Cheap alignment.
-            ui.label(RichText::new(format!("Ch {}", idx)).monospace());
-            channel.ui(ui);
+            ui.horizontal(|ui| {
+                // Cheap alignment.
+                ui.label(RichText::new(format!("Ch {}", idx)).monospace());
+                channel.ui(ui);
+            });
         }
 
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 // Instruments and Sequences - use channel 0.
-                bank.ui(ui, &mut self.channels[0]);
+                let bank = self.bank.clone();
+                bank.ui(ui, self);
                 // And sounds
-                self.sound_ui(bank, ui);
+                self.sound_ui(ui);
             });
     }
 }

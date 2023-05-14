@@ -54,15 +54,14 @@ const GAME_CONF: Config = Config {
 };
 
 struct PlayerApp {
-    bank: Arc<Mutex<sound_player::SoundBank>>,
     synth: Arc<Mutex<sound_player::Synth>>,
 }
 
 impl PlayerApp {
     fn new(bank: sound_player::SoundBank) -> PlayerApp {
-        let bank = Arc::new(Mutex::new(bank));
-        let synth = Arc::new(Mutex::new(sound_player::Synth::new(bank.clone())));
-        PlayerApp { bank, synth }
+        let bank = Arc::new(bank);
+        let synth = Arc::new(Mutex::new(sound_player::Synth::new(bank)));
+        PlayerApp { synth }
     }
 }
 
@@ -70,8 +69,7 @@ impl App for PlayerApp {
     fn update(&mut self, ctx: &Context, _frame: &mut Frame) {
         CentralPanel::default().show(ctx, |ui| {
             let mut synth = self.synth.lock().unwrap();
-            let mut bank = self.bank.lock().unwrap();
-            synth.ui(&mut bank, ui);
+            synth.ui(ui);
         });
         // Cheap way of ensuring GUI catches the sounds finishing,
         // without having the sound-players hold a reference to the

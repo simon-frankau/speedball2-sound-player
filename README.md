@@ -27,7 +27,6 @@ All the other sounds are valid in game mode.
 ## TODO
 
  * wav export may also be nice
- * Sample waveform visualisation might be nice.
 
 ## Data
 
