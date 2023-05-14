@@ -8,7 +8,6 @@
 //
 
 use std::fmt;
-use std::fs::File;
 use std::sync::Arc;
 use std::thread;
 
@@ -17,12 +16,7 @@ use cpal::Sample;
 use egui::plot::{Line, Plot, PlotPoints, VLine};
 use egui::{Button, CollapsingHeader, Color32, DragValue, RichText, Ui};
 
-use rfd::FileDialog;
-
-use wav::{bit_depth::BitDepth, header, Header};
-
 use crate::cpal_wrapper;
-use crate::cpal_wrapper::SoundSource;
 use crate::sound_data::*;
 
 const MAX_VOLUME: f32 = 64.0;
@@ -824,7 +818,7 @@ pub struct Synth {
     bank: Arc<SoundBank>,
     stereo: bool,
     play_mode: PlayMode,
-    max_len: f32,
+    max_rec_time_s: f32,
 }
 
 impl Synth {
@@ -835,7 +829,7 @@ impl Synth {
             bank,
             stereo: true,
             play_mode: PlayMode::Speakers,
-            max_len: 3.0,
+            max_rec_time_s: 3.0,
         }
     }
 
@@ -866,38 +860,7 @@ impl Synth {
     }
 
     fn record(&mut self) {
-        let file_name = FileDialog::new()
-            .add_filter("Wave", &["wav"])
-            .set_file_name("speedball2.wav")
-            .save_file();
-
-        if let Some(name) = file_name {
-            let num_channels = if self.stereo { 2 } else { 1 };
-            // Everyone loves CD quality. :p
-            const SAMPLING_RATE: u32 = 44_100;
-            const BITS_PER_SAMPLE: u16 = 16;
-            let header = Header::new(
-                header::WAV_FORMAT_PCM,
-                num_channels,
-                SAMPLING_RATE,
-                BITS_PER_SAMPLE,
-            );
-            let max_samples = (self.max_len * SAMPLING_RATE as f32 * num_channels as f32) as usize;
-            // Choose a size that isn't too much overhead, but means we
-            // don't chuck in too much unnecesary silence.`
-            const BATCH_SIZE: usize = 441;
-            let batch = BATCH_SIZE * num_channels as usize;
-            let mut data: Vec<i16> = Vec::new();
-            while data.len() < max_samples && self.channels.iter().any(|ch| ch.is_active()) {
-                let old_len = data.len();
-                data.resize(old_len + batch, 0);
-                self.fill_buffer(num_channels, SAMPLING_RATE, &mut data[old_len..]);
-            }
-            let mut out_file =
-                File::create(&name).expect(&format!("Couldn't create file '{}'", name.display()));
-            wav::write(header, &BitDepth::Sixteen(data), &mut out_file)
-                .expect("Couldn't write wav file");
-        }
+	cpal_wrapper::write_wav(self, self.stereo, self.max_rec_time_s);
     }
 
     pub fn play_instr(&mut self, instr: &Instrument) {
@@ -952,7 +915,7 @@ impl Synth {
                 });
             if self.play_mode == PlayMode::WaveFile {
                 ui.label("up to");
-                ui.add(DragValue::new(&mut self.max_len).speed(0.1));
+                ui.add(DragValue::new(&mut self.max_rec_time_s).speed(0.1));
                 ui.label("seconds");
             }
         });
@@ -1010,5 +973,9 @@ impl cpal_wrapper::SoundSource for Synth {
                 }
             }
         }
+    }
+
+    fn stream_done(&self) -> bool {
+	self.channels.iter().any(|ch| ch.is_active())
     }
 }
