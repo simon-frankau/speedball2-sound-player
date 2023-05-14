@@ -8,14 +8,21 @@
 //
 
 use std::fmt;
+use std::fs::File;
 use std::sync::Arc;
+use std::thread;
 
 use cpal::Sample;
 
 use egui::plot::{Line, Plot, PlotPoints, VLine};
 use egui::{Button, CollapsingHeader, Color32, DragValue, RichText, Ui};
 
+use rfd::FileDialog;
+
+use wav::{bit_depth::BitDepth, header, Header};
+
 use crate::cpal_wrapper;
+use crate::cpal_wrapper::SoundSource;
 use crate::sound_data::*;
 
 const MAX_VOLUME: f32 = 64.0;
@@ -177,6 +184,7 @@ impl SoundBank {
 // by Amiga hardware and the sound interrupt routine.
 //
 
+#[derive(Clone)]
 struct SampleChannel {
     bank: Arc<SoundBank>,
     instr: Option<Instrument>,
@@ -326,6 +334,7 @@ impl BendState {
     }
 }
 
+#[derive(Clone)]
 pub struct EffectState {
     tremolos: [BendState; 2],
     vibratos: [BendState; 3],
@@ -399,6 +408,7 @@ impl EffectState {
 // so.
 //
 
+#[derive(Clone)]
 pub struct Sequence {
     addr: usize,
     start_addr: usize,
@@ -684,6 +694,7 @@ impl Sequence {
 // Sound channel capable of playing a sound.
 //
 
+#[derive(Clone)]
 pub struct Options {
     tremolo: bool,
     vibrato: bool,
@@ -706,6 +717,7 @@ impl Options {
     }
 }
 
+#[derive(Clone)]
 pub struct SoundChannel {
     bank: Arc<SoundBank>,
     sample_channel: SampleChannel,
@@ -740,9 +752,18 @@ impl SoundChannel {
         self.sequence = None;
     }
 
+    pub fn stop_hard(&mut self) {
+        self.sample_channel.stop_hard();
+        self.sequence = None;
+    }
+
+    pub fn is_active(&self) -> bool {
+        self.sequence.is_some() || self.sample_channel.instr.is_some()
+    }
+
     pub fn ui(&mut self, ui: &mut Ui) {
         ui.horizontal(|ui| {
-            let stop_colour = if self.sequence.is_some() || self.sample_channel.instr.is_some() {
+            let stop_colour = if self.is_active() {
                 Color32::DARK_RED
             } else {
                 Color32::DARK_GRAY
@@ -791,12 +812,13 @@ impl SoundChannel {
 ////////////////////////////////////////////////////////////////////////
 // 4-channel synthesiser
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum PlayMode {
     Speakers,
     WaveFile,
 }
 
+#[derive(Clone)]
 pub struct Synth {
     pub channels: [SoundChannel; 4],
     bank: Arc<SoundBank>,
@@ -817,23 +839,83 @@ impl Synth {
         }
     }
 
+    // A wrapper that can either call a function normally, or redirect
+    // the call to a clone of this synth and then redirect the sound
+    // to a .wav file. Fun!
+    pub fn route<F>(&mut self, f: F)
+    where
+        F: FnOnce(&mut Synth),
+    {
+        match self.play_mode {
+            PlayMode::Speakers => f(self),
+            PlayMode::WaveFile => {
+                let mut clone = self.clone();
+                // Ensure clone is in quiescent state first.
+                for ch in clone.channels.iter_mut() {
+                    ch.stop_hard();
+                }
+                // Start the sound...
+                f(&mut clone);
+                // And record it in a background thread, so as not to
+                // block the realtime music thread.
+                thread::spawn(move || clone.record());
+                // I'm ok to just detach the thread for a toy app like
+                // this.
+            }
+        }
+    }
+
+    fn record(&mut self) {
+        let file_name = FileDialog::new()
+            .add_filter("Wave", &["wav"])
+            .set_file_name("speedball2.wav")
+            .save_file();
+
+        if let Some(name) = file_name {
+            let num_channels = if self.stereo { 2 } else { 1 };
+            // Everyone loves CD quality. :p
+            const SAMPLING_RATE: u32 = 44_100;
+            const BITS_PER_SAMPLE: u16 = 16;
+            let header = Header::new(
+                header::WAV_FORMAT_PCM,
+                num_channels,
+                SAMPLING_RATE,
+                BITS_PER_SAMPLE,
+            );
+            let max_samples = (self.max_len * SAMPLING_RATE as f32 * num_channels as f32) as usize;
+            // Choose a size that isn't too much overhead, but means we
+            // don't chuck in too much unnecesary silence.`
+            const BATCH_SIZE: usize = 441;
+            let batch = BATCH_SIZE * num_channels as usize;
+            let mut data: Vec<i16> = Vec::new();
+            while data.len() < max_samples && self.channels.iter().any(|ch| ch.is_active()) {
+                let old_len = data.len();
+                data.resize(old_len + batch, 0);
+                self.fill_buffer(num_channels, SAMPLING_RATE, &mut data[old_len..]);
+            }
+            let mut out_file =
+                File::create(&name).expect(&format!("Couldn't create file '{}'", name.display()));
+            wav::write(header, &BitDepth::Sixteen(data), &mut out_file)
+                .expect("Couldn't write wav file");
+        }
+    }
+
     pub fn play_instr(&mut self, instr: &Instrument) {
-        // TODO: Divert to wavefile.
-        self.channels[0].play_instr(instr);
+        self.route(|synth| synth.channels[0].play_instr(instr));
     }
 
     pub fn play_seq(&mut self, idx: usize) {
-        // TODO: Divert to wavefile.
-        self.channels[0].play_seq(idx);
+        self.route(|synth| synth.channels[0].play_seq(idx));
     }
 
     pub fn play_sound(&mut self, sound: &Sound) {
-        // TODO: Divert to wavefile.
-        for (channel, seq) in self.channels.iter_mut().zip(sound.sequences.iter()) {
-            if *seq != 0 {
-                channel.play_seq(*seq);
+        self.route(|synth| {
+            for (channel, seq) in synth.channels.iter_mut().zip(sound.sequences.iter()) {
+                if *seq != 0 {
+                    channel.play_seq(*seq);
+                }
             }
-        }
+        });
     }
 
     pub fn sound_ui(&mut self, ui: &mut Ui) {

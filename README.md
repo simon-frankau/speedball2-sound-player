@@ -24,10 +24,6 @@ The only sounds used in intro-mode are:
 
 All the other sounds are valid in game mode.
 
-## TODO
-
- * wav export may also be nice
-
 ## Data
 
  * `data/main.bin` is basically `overlay_00.bin`, taken from my

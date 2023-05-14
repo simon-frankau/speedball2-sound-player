@@ -20,6 +20,7 @@ pub trait SoundSource {
     );
 }
 
+// Given a sound source, play it to speakers.
 pub fn sound_init<S>(source: Arc<Mutex<S>>) -> Stream
 where
     S: SoundSource + Send + 'static,
